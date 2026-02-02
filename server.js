@@ -15,7 +15,7 @@ const app = express();
 // 1. DYNAMIC CORS SETUP (Local aur Live dono ke liye)
 const allowedOrigins = [
   "http://localhost:3000",
-  "https://hotel-resturant-mangement-system.vercel.app",
+  'https://6980e96a90579a4b376914ad--joyful-panda-706784.netlify.app',
 ];
 
 app.use(
