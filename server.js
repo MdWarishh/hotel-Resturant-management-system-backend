@@ -12,27 +12,32 @@ dotenv.config();
 const app = express();
 
 // Middleware
-// 1. DYNAMIC CORS SETUP (Local aur Live dono ke liye)
+// 1. DYNAMIC CORS SETUP (Local aur Deployed Netlify dono ke liye)
 const allowedOrigins = [
-  "http://localhost:3000",
-  'https://6980e96a90579a4b376914ad--joyful-panda-706784.netlify.app',
+  'http://localhost:3000',                                    // Local development
+  'https://6980e96a90579a4b376914ad--joyful-panda-706784.netlify.app',  // Tera current Netlify deploy preview
+  // Agar custom domain hai future me, yaha add kar: 'https://amulyarestaurant.com'
+  // Ya agar Netlify main domain: 'https://joyful-panda-706784.netlify.app'
+  /^https:\/\/.*\.netlify\.app$/,
 ];
 
 app.use(
   cors({
     origin: function (origin, callback) {
-      // allow requests with no origin (like mobile apps or curl requests)
+      // Allow requests with no origin (like mobile apps, Postman, curl)
       if (!origin) return callback(null, true);
-      if (allowedOrigins.indexOf(origin) !== -1 || /vercel\.app$/.test(origin)) {
+
+      // Check if origin is in allowed list
+      if (allowedOrigins.includes(origin)) {
         callback(null, true);
       } else {
-        callback(new Error("Not allowed by CORS"));
+        callback(new Error('Not allowed by CORS'));
       }
     },
-    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],  // All needed methods
+    credentials: true,  // Cookies/auth headers allow karne ke liye
   })
 );
-
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
@@ -50,7 +55,7 @@ app.get('/', (req, res) => {
   });
 });
 
-// Import Routes
+// Import Routes (same as before)
 import authRoutes from './src/modules/auth/routes/auth.routes.js';
 import hotelRoutes from './src/modules/hotels/routes/hotel.routes.js';
 import userRoutes from './src/modules/users/routes/user.routes.js';
@@ -62,7 +67,7 @@ import billingRoutes from './src/modules/billing/routes/billing.routes.js';
 import reportsRoutes from './src/modules/reports/routes/reports.routes.js';
 import tableRoutes from './src/modules/tables/routes/table.routes.js';
 
-// Mount API Routes
+// Mount API Routes (same)
 app.use('/api/auth', authRoutes);
 app.use('/api/hotels', hotelRoutes);
 app.use('/api/users', userRoutes);
@@ -74,8 +79,7 @@ app.use('/api/billing', billingRoutes);
 app.use('/api/reports', reportsRoutes);
 app.use('/api/tables', tableRoutes);
 
-
-// Global Error Handler
+// Global Error Handler (same)
 app.use((err, req, res, next) => {
   console.error('Error:', err.stack);
   
@@ -93,15 +97,14 @@ const httpServer = createServer(app);
 
 const io = new Server(httpServer, {
   cors: {
-    origin: allowedOrigins,
+    origin: allowedOrigins,  // Same list use kar rahe hain
     credentials: true,
   },
 });
 
-// 🔥 POS namespace
+// 🔥 POS namespace (same as before)
 const posNamespace = io.of('/pos');
 
-// 🔐 Socket auth (JWT)
 posNamespace.use((socket, next) => {
   try {
     const token = socket.handshake.auth?.token;
@@ -126,16 +129,15 @@ posNamespace.on('connection', (socket) => {
 // 🔗 Make io available in controllers
 app.set('io', io);
 
-httpServer.listen(PORT,'0.0.0.0', () => {
+httpServer.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 Server running on port ${PORT}`);
   console.log(`📡 Socket.IO enabled at /pos`);
 });
 
-// Graceful Shutdown
+// Graceful Shutdown (same)
 const gracefulShutdown = async (signal) => {
   console.log(`\n${signal} received. Starting graceful shutdown...`);
   
-  // 'server.close' ki jagah 'httpServer.close' karein
   httpServer.close(async () => {
     console.log('✅ HTTP server closed');
     try {
