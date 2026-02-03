@@ -17,6 +17,7 @@ const allowedOrigins = [
   'http://localhost:3000',                                    // Local development
   'https://6980e96a90579a4b376914ad--joyful-panda-706784.netlify.app',  // Tera current Netlify deploy preview
   // Agar custom domain hai future me, yaha add kar: 'https://amulyarestaurant.com'
+  'https://hotel-resturant-mangement-system-fr.vercel.app',
   // Ya agar Netlify main domain: 'https://joyful-panda-706784.netlify.app'
   /^https:\/\/.*\.netlify\.app$/,
 ];
