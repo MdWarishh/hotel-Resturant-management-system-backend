@@ -18,6 +18,7 @@ const allowedOrigins = [
   'https://fusionpos.in'
 ].filter(Boolean);
 
+// new thing 
 
 app.use(
   cors({
