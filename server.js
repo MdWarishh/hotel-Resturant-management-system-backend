@@ -13,32 +13,34 @@ const app = express();
 
 // Middleware
 // 1. DYNAMIC CORS SETUP (Local aur Deployed Netlify dono ke liye)
+// Optimized CORS for Production
 const allowedOrigins = [
   'http://localhost:3000',
-  'https://fusionpos.in'
-].filter(Boolean);
-
-// new thing 
+  'https://fusionpos.in',
+  'https://www.fusionpos.in'
+];
 
 app.use(cors({
   origin: function (origin, callback) {
+    // Allow requests with no origin (like mobile apps or curl)
     if (!origin) return callback(null, true);
-
-    const allowed = [
-      'http://localhost:3000',
-      'https://fusionpos.in',
-      'https://www.fusionpos.in'
-    ];
-
-    if (allowed.includes(origin)) {
+    
+    if (allowedOrigins.indexOf(origin) !== -1 || allowedOrigins.includes(origin)) {
       callback(null, true);
     } else {
-      console.log('Blocked by CORS:', origin);
-      callback(null, false);
+      console.error(`CORS Blocked Origin: ${origin}`);
+      callback(new Error('Not allowed by CORS'));
     }
   },
-  credentials: true
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+  credentials: true,
+  preflightContinue: false,
+  optionsSuccessStatus: 204
 }));
+
+// Explicitly handle OPTIONS preflight for all routes
+// app.options('/:any*', cors());
 
 
 
@@ -112,7 +114,7 @@ const httpServer = createServer(app);
 
 const io = new Server(httpServer, {
   cors: {
-    origin: allowedOrigins,  // Same list use kar rahe hain
+    origin: allowedOrigins, // Use the array we defined above
     credentials: true,
   },
 });
