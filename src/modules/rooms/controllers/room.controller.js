@@ -22,6 +22,7 @@ export const createRoom = asyncHandler(async (req, res) => {
     description,
     amenities,
     features,
+    images,
   } = req.body;
 
   // Authorization: Hotel Admin can only create rooms for their hotel
@@ -58,6 +59,7 @@ export const createRoom = asyncHandler(async (req, res) => {
     description,
     amenities,
     features,
+    images: images || [],
     createdBy: req.user._id,
   });
 
@@ -218,6 +220,16 @@ export const updateRoom = asyncHandler(async (req, res) => {
 
     updateData.roomNumber = updateData.roomNumber.toUpperCase();
   }
+
+  if (updateData.images && Array.isArray(updateData.images)) {
+    // This ensures that the objects have the required url and public_id
+    updateData.images = updateData.images.map(img => ({
+      url: img.url,
+      public_id: img.public_id,
+      isPrimary: img.isPrimary || false
+    }));
+  }
+  
 
   // Update room
   const updatedRoom = await Room.findByIdAndUpdate(id, updateData, {

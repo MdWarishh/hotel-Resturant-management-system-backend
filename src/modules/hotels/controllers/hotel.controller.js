@@ -21,6 +21,17 @@ export const createHotel = asyncHandler(async (req, res) => {
     amenities,
   } = req.body;
 
+    // 🔥 SAFETY CHECK
+  if (!gst?.number) {
+    throw new AppError('GST number is required', HTTP_STATUS.BAD_REQUEST);
+  }
+
+  // Convert GST to uppercase first
+  const gstNumber = gst.number.toUpperCase();
+
+  // 🔥 Extract state code from GST (first 2 digits)
+  const stateCodeFromGST = gstNumber.substring(0, 2);
+
   // Check if hotel code already exists
   const existingHotel = await Hotel.findOne({ code: code.toUpperCase() });
   if (existingHotel) {
@@ -38,7 +49,10 @@ export const createHotel = asyncHandler(async (req, res) => {
     name,
     code: code.toUpperCase(),
     description,
-    address,
+    address: {
+    ...address,
+    stateCode: stateCodeFromGST,
+  },
     contact,
     gst: {
       number: gst.number.toUpperCase(),

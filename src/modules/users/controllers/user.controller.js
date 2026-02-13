@@ -4,6 +4,9 @@ import { successResponse, paginatedResponse } from '../../../utils/responseHandl
 import { HTTP_STATUS, PAGINATION, USER_ROLES } from '../../../config/constants.js';
 import asyncHandler from '../../../utils/asyncHandler.js';
 import AppError from '../../../utils/AppError.js';
+import multer from 'multer'
+const upload = multer({ dest: 'uploads/cv/' })
+
 
 /**
  * Get All Users
@@ -112,11 +115,17 @@ export const getUserById = asyncHandler(async (req, res) => {
  */
 export const createUser = asyncHandler(async (req, res) => {
   const { name, email, password, phone, role, hotel, address } = req.body;
+   const cvFile = req.file;
+
 
   // Check if user already exists
   const existingUser = await User.findOne({ email });
   if (existingUser) {
     throw new AppError('User with this email already exists', HTTP_STATUS.CONFLICT);
+  }
+
+  if (!cvFile) {
+    throw new AppError('CV file is required', HTTP_STATUS.BAD_REQUEST);
   }
 
   // Authorization: Hotel Admin can only create users for their hotel
@@ -140,6 +149,8 @@ export const createUser = asyncHandler(async (req, res) => {
     }
   }
 
+   
+
   // Create user
   const userData = {
     name,
@@ -147,6 +158,7 @@ export const createUser = asyncHandler(async (req, res) => {
     password,
     phone,
     role: role || USER_ROLES.CASHIER,
+    cvUrl: cvFile.path,
     status: 'active',
     createdBy: req.user._id,
   };
@@ -158,7 +170,7 @@ export const createUser = asyncHandler(async (req, res) => {
 
   // Add address if provided
   if (address) {
-    userData.address = address;
+    userData.address = typeof address === 'string' ? JSON.parse(address) : address;
   }
 
   const user = await User.create(userData);
@@ -315,4 +327,31 @@ export const getUsersByHotel = asyncHandler(async (req, res) => {
     'Hotel users fetched successfully',
     { users, count: users.length }
   );
+});
+
+
+
+
+/**
+ * Reset User Password (Admin Override)
+ * POST /api/users/:id/reset-password
+ */
+export const resetPassword = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const { newPassword } = req.body;
+
+  if (!newPassword || newPassword.length < 6) {
+    throw new AppError('Please provide a new password (min 6 chars)', HTTP_STATUS.BAD_REQUEST);
+  }
+
+  const user = await User.findById(id);
+  if (!user) {
+    throw new AppError('User not found', HTTP_STATUS.NOT_FOUND);
+  }
+
+  // Update password - your User model should have a pre-save hook to hash this
+  user.password = newPassword;
+  await user.save();
+
+  return successResponse(res, HTTP_STATUS.OK, 'Password reset successfully');
 });

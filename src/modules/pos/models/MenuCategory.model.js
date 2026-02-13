@@ -14,12 +14,17 @@ const menuCategorySchema = new mongoose.Schema(
       trim: true,
       minlength: [2, 'Category name must be at least 2 characters'],
       maxlength: [50, 'Category name cannot exceed 50 characters'],
+      unique: true,
     },
     description: {
       type: String,
       maxlength: [200, 'Description cannot exceed 200 characters'],
       default: '',
     },
+    order: {
+    type: Number,
+    default: 0, // For sorting
+  },
     displayOrder: {
       type: Number,
       default: 0,

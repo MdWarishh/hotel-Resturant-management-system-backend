@@ -66,6 +66,11 @@ const userSchema = new mongoose.Schema(
       type: Date,
       default: Date.now,
     },
+  
+cvUrl: {
+  type: String,
+  default: null
+},
     lastLogin: {
       type: Date,
       default: null,

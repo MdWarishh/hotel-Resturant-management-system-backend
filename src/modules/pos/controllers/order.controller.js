@@ -8,6 +8,9 @@ import { successResponse, paginatedResponse } from '../../../utils/responseHandl
 import { HTTP_STATUS, PAGINATION, USER_ROLES, ORDER_STATUS, GST_RATE } from '../../../config/constants.js';
 import asyncHandler from '../../../utils/asyncHandler.js';
 import AppError from '../../../utils/AppError.js';
+// Add this at the top of order.controller.js
+import PDFDocument from 'pdfkit';
+import Table from '../../tables/models/Table.model.js';
 
 /**
  * Create Order
@@ -119,15 +122,31 @@ if (payment && payment.mode) {
       tax,
       total,
     },
-      status:
-    paymentData.status === 'PAID'
-      ? ORDER_STATUS.SERVED
-      : ORDER_STATUS.PENDING,
+    status: ORDER_STATUS.PENDING,
 
   payment: paymentData,
     specialInstructions,
     createdBy: req.user._id,
   });
+
+  // --- ADD THIS TABLE UPDATE LOGIC HERE ---
+if (orderType === 'dine-in' && tableNumber) {
+  // Update the table status to 'occupied'
+  const updatedTable = await Table.findOneAndUpdate(
+    { 
+      hotel: assignedHotel, 
+      tableNumber: tableNumber 
+    },
+    { status: 'occupied' }, //
+    { new: true }
+  ).populate('hotel', 'name');
+
+  if (updatedTable) {
+    // Emit the update to the /pos namespace for real-time dashboard updates
+    const io = req.app.get('io');
+    io.of('/pos').emit('table:updated', updatedTable);
+  }
+}
 
   const populatedOrder = await Order.findById(order._id)
     .populate('hotel', 'name code')
@@ -138,7 +157,8 @@ if (payment && payment.mode) {
 
     const io = req.app.get('io');
 io.of('/pos').emit('order:created', populatedOrder);
-
+io.of('/pos').emit('order:updated', populatedOrder);
+io.of('/pos').emit('order:paid', populatedOrder);
   return successResponse(
     res,
     HTTP_STATUS.CREATED,
@@ -160,6 +180,8 @@ export const getAllOrders = asyncHandler(async (req, res) => {
     status,
     orderType,
     search,
+    startDate, // ✅ Added
+    endDate,   // ✅ Added
   } = req.query;
 
   // Build query
@@ -172,8 +194,23 @@ export const getAllOrders = asyncHandler(async (req, res) => {
     query.hotel = hotel;
   }
 
-  if (status) {
-    query.status = status;
+if (status) {
+    const statusArray = status.split(',');
+    query.status = { $in: statusArray };
+  }
+
+  if (startDate || endDate) {
+    query.createdAt = {};
+    if (startDate) {
+      const start = new Date(startDate);
+      start.setHours(0, 0, 0, 0);
+      query.createdAt.$gte = start;
+    }
+    if (endDate) {
+      const end = new Date(endDate);
+      end.setHours(23, 59, 59, 999);
+      query.createdAt.$lte = end;
+    }
   }
 
   if (orderType) {
@@ -320,33 +357,41 @@ io.of('/pos').emit('order:updated', updatedOrder);
  * GET /api/pos/orders/kitchen
  * Access: Kitchen Staff, Manager
  */
+/**
+ * Get Kitchen Orders
+ * GET /api/pos/orders/kitchen
+ * Access: Hotel Admin, Manager, Kitchen Staff (add role check if needed)
+ */
 export const getKitchenOrders = asyncHandler(async (req, res) => {
-  const { hotel } = req.query;
+  const { status, all } = req.query; // Optional filters
 
-  // Build query
-  let assignedHotel = hotel;
-  if (req.user.role !== USER_ROLES.SUPER_ADMIN) {
-    assignedHotel = req.user.hotel._id;
+  // Base query: same hotel as user
+  let query = { hotel: req.user.hotel._id };
+
+  // Status filter logic
+  if (all === 'true') {
+    // Show all orders (use ?all=true in frontend if needed)
+    // Optional: exclude completed/cancelled
+    query.status = { $nin: ['cancelled', 'settled', 'completed'] };
+  } else if (status) {
+    // ?status=pending,preparing
+    query.status = { $in: status.split(',') };
+  } else {
+    // Default for kitchen: show pending -> paid/served (to see full flow)
+    query.status = { $in: ['pending', 'preparing', 'ready', 'served', 'paid'] };
   }
 
-  // Get active orders (pending or preparing)
-  const orders = await Order.find({
-    hotel: assignedHotel,
-    status: { $in: [ORDER_STATUS.PENDING, ORDER_STATUS.PREPARING] },
-  })
-    .populate('room', 'roomNumber')
-    .populate('items.menuItem', 'name type preparationTime')
-    .sort({ createdAt: 1 });
+  const orders = await Order.find(query)
+    .populate('items.menuItem', 'name price variant') // Key for display
+    .populate('hotel', 'name code')
+    .populate('room booking customer', 'name number') // If needed
+    .sort({ createdAt: -1 }) // Newest first
+    .limit(200); // Prevent overload; adjust as needed
 
-  return successResponse(
-    res,
-    HTTP_STATUS.OK,
-    'Kitchen orders fetched successfully',
-    { orders, count: orders.length }
-  );
+  console.log(`[Kitchen] Fetched ${orders.length} orders for hotel ${req.user.hotel._id} (query: ${JSON.stringify(query)})`);
+
+  successResponse(res, HTTP_STATUS.OK, 'Kitchen orders fetched', { orders });
 });
-
-
 
 
 /**
@@ -488,3 +533,151 @@ export const getRunningOrders = asyncHandler(async (req, res) => {
     { orders, count: orders.length }
   );
 });
+
+export const getOrderInvoicePDF = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+
+  const order = await Order.findById(id)
+    .populate('hotel')
+    .populate('items.menuItem', 'name price');
+
+  if (!order) {
+    throw new AppError('Order not found', HTTP_STATUS.NOT_FOUND);
+  }
+
+  // Create PDF Document
+  const doc = new PDFDocument({
+    size: 'A4',
+    margin: 40,
+    layout: 'portrait',
+  });
+
+  // Stream to response
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', `inline; filename=invoice-${order.orderNumber}.pdf`);
+  doc.pipe(res);
+
+  // Colors
+  const primaryColor = '#00ADB5'; // rgb(0,173,181)
+  const accentColor = '#222831';
+  const lightGray = '#EEEEEE';
+  const darkGray = '#393E46';
+
+  // Header - Hotel Logo / Name
+  doc.fillColor(primaryColor).fontSize(28).font('Helvetica-Bold').text(order.hotel.name, {
+    align: 'center',
+  });
+
+  doc.fillColor(darkGray).fontSize(10).text(order.hotel.address?.street || '', {
+    align: 'center',
+  });
+  doc.text(`${order.hotel.address?.city || ''}, ${order.hotel.address?.state || ''} ${order.hotel.address?.pincode || ''}`, {
+    align: 'center',
+  });
+  doc.moveDown(0.5);
+
+  doc.fillColor(darkGray).fontSize(9).text(`Phone: ${order.hotel.contact?.phone || 'N/A'} | Email: ${order.hotel.contact?.email || 'N/A'}`, {
+    align: 'center',
+  });
+
+  doc.moveDown(1);
+
+  // Invoice Title & Info
+  doc.fillColor(accentColor).fontSize(18).text('INVOICE', { align: 'center' });
+  doc.moveDown(0.5);
+
+  doc.fontSize(11).fillColor(darkGray);
+  doc.text(`Invoice No: ${order.orderNumber}`, 50, doc.y);
+  doc.text(`Date: ${new Date(order.createdAt).toLocaleDateString('en-IN')}`, 50, doc.y);
+  doc.text(`Order Type: ${order.orderType.toUpperCase()}`, 50, doc.y);
+
+  if (order.tableNumber) {
+    doc.text(`Table: ${order.tableNumber}`, 50, doc.y);
+  }
+  if (order.room?.roomNumber) {
+    doc.text(`Room: ${order.room.roomNumber}`, 50, doc.y);
+  }
+
+  doc.moveDown(1);
+
+  // Bill To Section
+  doc.fillColor(primaryColor).fontSize(12).text('Bill To:', 50, doc.y);
+  doc.fillColor(darkGray).fontSize(11);
+  doc.text(`Name: ${order.customer?.name || 'Guest'}`, 50, doc.y);
+  if (order.customer?.phone) doc.text(`Phone: ${order.customer.phone}`, 50, doc.y);
+  if (order.customer?.email) doc.text(`Email: ${order.customer.email}`, 50, doc.y);
+
+  doc.moveDown(1.5);
+
+  // Items Table
+  const tableTop = doc.y;
+  const tableHeaders = ['Item', 'Qty', 'Price', 'Amount'];
+  const colWidths = [240, 60, 80, 100];
+  let x = 50;
+
+  // Table Header
+  doc.fillColor(lightGray).rect(40, tableTop - 10, 510, 30).fill();
+  doc.fillColor(accentColor).font('Helvetica-Bold').fontSize(11);
+  tableHeaders.forEach((header, i) => {
+    doc.text(header, x, tableTop, { width: colWidths[i], align: i === 3 ? 'right' : 'left' });
+    x += colWidths[i];
+  });
+
+  // Items Rows
+  doc.font('Helvetica').fontSize(10).fillColor(darkGray);
+  let currentY = tableTop + 30;
+
+  order.items.forEach((item) => {
+    const itemName = item.menuItem?.name || 'Unknown Item';
+    const qty = item.quantity;
+    const price = item.price;
+    const total = qty * price;
+
+    x = 50;
+    doc.text(itemName, x, currentY, { width: colWidths[0], align: 'left', lineBreak: true });
+    x += colWidths[0];
+    doc.text(qty.toString(), x, currentY, { width: colWidths[1], align: 'center' });
+    x += colWidths[1];
+    doc.text(`₹${price.toFixed(2)}`, x, currentY, { width: colWidths[2], align: 'right' });
+    x += colWidths[2];
+    doc.text(`₹${total.toFixed(2)}`, x, currentY, { width: colWidths[3], align: 'right' });
+
+    currentY += 25;
+  });
+
+  // Totals Section
+  doc.moveDown(1);
+  doc.fillColor(primaryColor).font('Helvetica-Bold').fontSize(12).text('Summary', 400, doc.y);
+  doc.moveDown(0.5);
+
+  doc.font('Helvetica').fontSize(11).fillColor(darkGray);
+  const totalsX = 350;
+  doc.text('Subtotal:', totalsX, doc.y);
+  doc.text(`₹${order.pricing.subtotal.toFixed(2)}`, 450, doc.y, { align: 'right' });
+  doc.moveDown(0.5);
+
+  if (order.pricing.discount > 0) {
+    doc.text('Discount:', totalsX, doc.y);
+    doc.text(`-₹${order.pricing.discount.toFixed(2)}`, 450, doc.y, { align: 'right' });
+    doc.moveDown(0.5);
+  }
+
+  doc.text('GST (5%):', totalsX, doc.y);
+  doc.text(`₹${order.pricing.tax.toFixed(2)}`, 450, doc.y, { align: 'right' });
+  doc.moveDown(0.5);
+
+  doc.font('Helvetica-Bold').fontSize(12).fillColor(primaryColor);
+  doc.text('Grand Total:', totalsX, doc.y);
+  doc.text(`₹${order.pricing.total.toFixed(2)}`, 450, doc.y, { align: 'right' });
+
+  // Footer
+  doc.moveDown(2);
+  doc.fontSize(10).fillColor(darkGray).text('Thank you for dining with us!', 50, doc.y, { align: 'center' });
+  doc.text(`Payment Mode: ${order.payment?.mode || 'N/A'} • Status: ${order.payment?.status || 'Pending'}`, 50, doc.y + 15, { align: 'center' });
+
+  doc.end();
+});
+
+
+
+

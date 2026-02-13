@@ -11,9 +11,10 @@ export const getTodaySummary = async (req, res) => {
   const end = new Date();
   end.setHours(23, 59, 59, 999);
 
+  // FIX: Include 'served' status since that's what your payment controller sets
   const orders = await Order.find({
     hotel: hotelId,
-    status: ORDER_STATUS.COMPLETED,
+    status: { $in: [ORDER_STATUS.SERVED, ORDER_STATUS.COMPLETED] }, //
     createdAt: { $gte: start, $lte: end },
   });
 
@@ -28,11 +29,18 @@ export const getTodaySummary = async (req, res) => {
       ? 0
       : Math.ceil(totalSales / totalOrders);
 
+  // Provide a breakdown of payment modes for better insights
+  const paymentSplit = orders.reduce((acc, o) => {
+    const mode = o.payment?.mode || 'UNPAID';
+    acc[mode] = (acc[mode] || 0) + (o.pricing?.total || 0);
+    return acc;
+  }, {});
+
   return successResponse(res, 200, 'POS summary', {
     totalSales,
     totalOrders,
     avgOrderValue,
-    paymentSplit: {},
+    paymentSplit,
     topItems: [],
     peakHours: [],
   });

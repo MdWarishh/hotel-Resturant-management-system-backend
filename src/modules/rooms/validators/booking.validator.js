@@ -5,12 +5,29 @@ import { HTTP_STATUS } from '../../../config/constants.js';
  * Validate Create Booking Data
  */
 export const validateCreateBooking = (req, res, next) => {
-  const { room, guest, numberOfGuests, dates } = req.body;
+  const { room, guest, numberOfGuests, dates, source, bookingType, hours } = req.body;
   const errors = [];
 
   // Room validation
   if (!room) {
     errors.push('Room ID is required');
+  }
+
+  // 🔥 NEW: Booking type validation
+  if (!bookingType) {
+    errors.push('Booking type is required (daily or hourly)');
+  } else if (!['daily', 'hourly'].includes(bookingType)) {
+    errors.push('Booking type must be either "daily" or "hourly"');
+  }
+
+  // 🔥 NEW: Hours validation for hourly bookings
+  if (bookingType === 'hourly') {
+    if (!hours || hours < 1 || hours > 12) {
+      errors.push('Hours must be between 1 and 12 for hourly bookings');
+    }
+    if (!Number.isInteger(Number(hours))) {
+      errors.push('Hours must be a whole number');
+    }
   }
 
   // Guest validation
@@ -70,13 +87,40 @@ export const validateCreateBooking = (req, res, next) => {
         errors.push('Invalid check-out date');
       }
 
-      if (checkIn < today) {
-        errors.push('Check-in date cannot be in the past');
-      }
-      if (checkOut <= checkIn) {
-        errors.push('Check-out date must be after check-in date');
+      // 🔥 UPDATED: Different validation for daily vs hourly
+      if (bookingType === 'daily') {
+        // For daily bookings, check-in should not be in the past
+        if (checkIn < today) {
+          errors.push('Check-in date cannot be in the past');
+        }
+        if (checkOut <= checkIn) {
+          errors.push('Check-out date must be after check-in date');
+        }
+      } else if (bookingType === 'hourly') {
+        // For hourly bookings, allow today but must be in future
+        const now = new Date();
+        if (checkIn < now) {
+          errors.push('Check-in time cannot be in the past');
+        }
+        
+        // Calculate expected checkout based on hours
+        if (hours) {
+          const expectedCheckOut = new Date(checkIn.getTime() + hours * 60 * 60 * 1000);
+          const timeDiff = Math.abs(checkOut - expectedCheckOut);
+          
+          // Allow 5 minute tolerance
+          if (timeDiff > 5 * 60 * 1000) {
+            errors.push(`Check-out time must be exactly ${hours} hours after check-in`);
+          }
+        }
       }
     }
+  }
+
+  // Source validation
+  const validSources = ['Direct', 'OYO', 'MakeMyTrip', 'Booking.com', 'Goibibo', 'Airbnb', 'Agoda', 'Other'];
+  if (source && !validSources.includes(source)) {
+    errors.push(`Invalid booking source. Allowed: ${validSources.join(', ')}`);
   }
 
   // If errors exist, return error response

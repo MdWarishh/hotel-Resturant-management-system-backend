@@ -5,6 +5,9 @@ export const USER_ROLES = {
   MANAGER: 'manager',
   CASHIER: 'cashier',
   KITCHEN_STAFF: 'kitchen_staff',
+  RECEPTIONIST: 'receptionist',
+  HOUSEKEEPING: 'housekeeping', // Add this
+  WAITER: 'waiter'
 };
 
 // User Status

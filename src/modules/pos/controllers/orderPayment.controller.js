@@ -5,6 +5,7 @@ import asyncHandler from '../../../utils/asyncHandler.js';
 import AppError from '../../../utils/AppError.js';
 import { successResponse } from '../../../utils/responseHandler.js';
 import { HTTP_STATUS, USER_ROLES, ORDER_STATUS } from '../../../config/constants.js';
+import Table from '../../tables/models/Table.model.js';
 
 /**
  * Mark Order as Paid
@@ -62,11 +63,23 @@ export const markOrderPaid = asyncHandler(async (req, res) => {
   };
 
   // ✅ Auto mark as served
-  order.status = ORDER_STATUS.SERVED;
-  order.timestamps.served = new Date();
+  // order.status = ORDER_STATUS.SERVED;
+  // order.timestamps.served = new Date();
   order.servedBy = req.user._id;
 
   await order.save();
+
+  if (order.orderType === 'dine-in' && order.tableNumber) {
+  const updatedTable = await Table.findOneAndUpdate(
+    { hotel: order.hotel, tableNumber: order.tableNumber },
+    { status: 'available' }, // Set back to available after payment
+    { new: true }
+  );
+  
+  // Notify frontend to update the table grid
+  const io = req.app.get('io');
+  io.of('/pos').emit('table:updated', updatedTable);
+}
 
   const populatedOrder = await Order.findById(order._id)
     .populate('hotel', 'name code')

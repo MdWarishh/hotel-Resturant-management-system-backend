@@ -5,7 +5,7 @@ import { HTTP_STATUS, ROOM_TYPES, ROOM_STATUS } from '../../../config/constants.
  * Validate Create Room Data
  */
 export const validateCreateRoom = (req, res, next) => {
-  const { roomNumber, roomType, floor, capacity, pricing } = req.body;
+  const { roomNumber, roomType, floor, capacity, pricing, features, images } = req.body;
   const errors = [];
 
   // Room number validation
@@ -52,6 +52,24 @@ export const validateCreateRoom = (req, res, next) => {
     }
     if (pricing.extraChildCharge !== undefined && pricing.extraChildCharge < 0) {
       errors.push('Extra child charge cannot be negative');
+    }
+  }
+
+  if (images) {
+    if (!Array.isArray(images)) {
+      errors.push('Images must be an array of objects');
+    } else {
+      images.forEach((img, index) => {
+        if (!img.url) errors.push(`Image at index ${index} is missing a URL`);
+        if (!img.public_id) errors.push(`Image at index ${index} is missing a Public ID`);
+      });
+    }
+  }
+
+  // Features validation (Ensure 'features' is defined before using it)
+  if (features) {
+    if (features.bedType && !['single', 'double', 'queen', 'king', 'twin'].includes(features.bedType)) {
+      errors.push('Invalid bed type');
     }
   }
 

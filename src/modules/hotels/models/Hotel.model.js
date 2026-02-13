@@ -33,6 +33,11 @@ const hotelSchema = new mongoose.Schema(
         required: [true, 'City is required'],
         trim: true,
       },
+      stateCode: {
+   type: String,
+   required: true,
+   match: [/^[0-9]{2}$/, 'State code must be 2 digits (01-37)'],
+ },
       state: {
         type: String,
         required: [true, 'State is required'],
@@ -143,6 +148,8 @@ const hotelSchema = new mongoose.Schema(
       ref: 'User',
       required: true,
     },
+    totalMenuCategories: { type: Number, default: 0 },
+    totalMenuItems: { type: Number, default: 0 },
   },
   {
     timestamps: true,

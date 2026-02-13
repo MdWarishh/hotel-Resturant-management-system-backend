@@ -75,6 +75,7 @@ const menuItemSchema = new mongoose.Schema(
     images: [
       {
         type: String,
+        default: '',
       },
     ],
     isAvailable: {
@@ -90,6 +91,10 @@ const menuItemSchema = new mongoose.Schema(
       default: 0,
       min: 0,
     },
+    veg: {
+    type: Boolean,
+    default: true, // Veg/non-veg flag
+  },
     ingredients: [
       {
         inventoryItem: {

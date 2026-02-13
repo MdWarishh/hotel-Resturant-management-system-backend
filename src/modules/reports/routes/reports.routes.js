@@ -5,6 +5,7 @@ import {
   getOccupancyReport,
   getSalesReport,
   getInventoryReport,
+  generateGSTReport,
 } from '../controllers/reports.controller.js';
 import { protect, authorize } from '../../../middlewares/auth.middleware.js';
 import { USER_ROLES } from '../../../config/constants.js';
@@ -33,7 +34,8 @@ router.get(
   authorize(
     USER_ROLES.SUPER_ADMIN,
     USER_ROLES.HOTEL_ADMIN,
-    USER_ROLES.MANAGER
+    USER_ROLES.MANAGER,
+    USER_ROLES.CASHIER
   ),
   getRevenueReport
 );
@@ -49,13 +51,17 @@ router.get(
   getOccupancyReport
 );
 
+router.get('/gst', protect, generateGSTReport);
+
+
 // Get sales report (POS)
 router.get(
   '/sales',
   authorize(
     USER_ROLES.SUPER_ADMIN,
     USER_ROLES.HOTEL_ADMIN,
-    USER_ROLES.MANAGER
+    USER_ROLES.MANAGER,
+    USER_ROLES.CASHIER
   ),
   getSalesReport
 );

@@ -1,6 +1,7 @@
 import express from 'express';
 import {
   createTable,
+  deleteTable,
   getTables,
   updateTable,
   updateTableStatus,
@@ -33,11 +34,19 @@ router.post(
  * Get tables
  */
 router.get('/', getTables);
+router.get('/:id', getTables);
 
 /**
  * Update table
  */
 router.put(
+  '/:id',
+  authorize(USER_ROLES.SUPER_ADMIN, USER_ROLES.HOTEL_ADMIN),
+  validateUpdateTable,
+  updateTable
+);
+
+router.patch(
   '/:id',
   authorize(USER_ROLES.SUPER_ADMIN, USER_ROLES.HOTEL_ADMIN),
   validateUpdateTable,
@@ -51,6 +60,15 @@ router.patch(
   '/:id/status',
   authorize(USER_ROLES.SUPER_ADMIN, USER_ROLES.HOTEL_ADMIN),
   updateTableStatus
+);
+
+/**
+ * Delete table
+ */
+router.delete(
+  '/:id',
+  authorize(USER_ROLES.SUPER_ADMIN, USER_ROLES.HOTEL_ADMIN),
+  deleteTable // This controller function needs to be created
 );
 
 export default router;

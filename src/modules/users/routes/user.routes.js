@@ -1,4 +1,5 @@
 import express from 'express';
+import multer from 'multer';
 import {
   getAllUsers,
   getUserById,
@@ -6,6 +7,7 @@ import {
   updateUser,
   deleteUser,
   getUsersByHotel,
+  resetPassword,
 } from '../controllers/user.controller.js';
 import { protect, authorize } from '../../../middlewares/auth.middleware.js';
 import {
@@ -16,7 +18,7 @@ import {
 import { USER_ROLES } from '../../../config/constants.js';
 
 const router = express.Router();
-
+const upload = multer({ dest: 'uploads/cv/' });
 /**
  * All routes require authentication
  */
@@ -43,7 +45,8 @@ router.get(
 router.post(
   '/',
   authorize(USER_ROLES.SUPER_ADMIN, USER_ROLES.HOTEL_ADMIN),
-  validateCreateUser,
+  upload.single('cv'),
+  // validateCreateUser,
   createUser
 );
 
@@ -78,6 +81,14 @@ router.put(
   authorize(USER_ROLES.SUPER_ADMIN, USER_ROLES.HOTEL_ADMIN),
   validateUpdateUser,
   updateUser
+);
+
+// Add this near your other POST or PUT routes
+router.post(
+  '/:id/reset-password',
+  validateUserId, // Reuse your existing validator
+  authorize(USER_ROLES.SUPER_ADMIN, USER_ROLES.HOTEL_ADMIN),
+  resetPassword
 );
 
 // Delete user (soft delete - deactivate)

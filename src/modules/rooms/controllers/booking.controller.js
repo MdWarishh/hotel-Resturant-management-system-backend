@@ -2,16 +2,54 @@ import Booking from '../models/Booking.model.js';
 import Room from '../models/Room.model.js';
 import Hotel from '../../hotels/models/Hotel.model.js';
 import { successResponse, paginatedResponse } from '../../../utils/responseHandler.js';
-import { HTTP_STATUS, PAGINATION, USER_ROLES, BOOKING_STATUS, ROOM_STATUS,PAYMENT_STATUS, GST_RATE } from '../../../config/constants.js';
+import { HTTP_STATUS, PAGINATION, USER_ROLES, BOOKING_STATUS, ROOM_STATUS, PAYMENT_STATUS, GST_RATE } from '../../../config/constants.js';
 import asyncHandler from '../../../utils/asyncHandler.js';
 import AppError from '../../../utils/AppError.js';
 import PDFDocument from 'pdfkit';
-import fs from 'fs';
-import path from 'path';
-
 
 /**
- * Create New Booking
+ * 🔥 UPDATED: Check Room Availability for Hourly/Daily Bookings
+ * Helper function to check if room is available for the requested time period
+ */
+const checkRoomAvailability = async (roomId, checkIn, checkOut, bookingType, excludeBookingId = null) => {
+  const query = {
+    room: roomId,
+    status: { $in: [BOOKING_STATUS.CONFIRMED, BOOKING_STATUS.CHECKED_IN, BOOKING_STATUS.RESERVED] },
+  };
+
+  if (excludeBookingId) {
+    query._id = { $ne: excludeBookingId };
+  }
+
+  // Find all active bookings for this room
+  const existingBookings = await Booking.find(query);
+
+  // Check for conflicts
+  for (const booking of existingBookings) {
+    const existingCheckIn = new Date(booking.dates.checkIn);
+    const existingCheckOut = new Date(booking.dates.checkOut);
+    const newCheckIn = new Date(checkIn);
+    const newCheckOut = new Date(checkOut);
+
+    // Check if dates overlap
+    const hasConflict =
+      (newCheckIn >= existingCheckIn && newCheckIn < existingCheckOut) ||
+      (newCheckOut > existingCheckIn && newCheckOut <= existingCheckOut) ||
+      (newCheckIn <= existingCheckIn && newCheckOut >= existingCheckOut);
+
+    if (hasConflict) {
+      return {
+        available: false,
+        conflictingBooking: booking,
+      };
+    }
+  }
+
+  return { available: true };
+};
+
+/**
+ * 🔥 UPDATED: Create New Booking (with Hourly Support)
  * POST /api/bookings
  * Access: Hotel Admin, Manager, Cashier
  */
@@ -24,6 +62,9 @@ export const createBooking = asyncHandler(async (req, res) => {
     dates,
     specialRequests,
     advancePayment,
+    source,
+    bookingType = 'daily', // 🔥 NEW
+    hours, // 🔥 NEW
   } = req.body;
 
   // Authorization: Only allow booking for user's hotel
@@ -48,6 +89,11 @@ export const createBooking = asyncHandler(async (req, res) => {
     throw new AppError('Room does not belong to this hotel', HTTP_STATUS.BAD_REQUEST);
   }
 
+  // 🔥 NEW: Check if room supports hourly bookings
+  if (bookingType === 'hourly' && !room.supportsHourlyBooking()) {
+    throw new AppError('This room does not support hourly bookings', HTTP_STATUS.BAD_REQUEST);
+  }
+
   // Check if room is available
   if (room.status !== ROOM_STATUS.AVAILABLE) {
     throw new AppError('Room is not available', HTTP_STATUS.BAD_REQUEST);
@@ -58,24 +104,43 @@ export const createBooking = asyncHandler(async (req, res) => {
   const checkOut = new Date(dates.checkOut);
 
   if (checkIn >= checkOut) {
-    throw new AppError('Check-out date must be after check-in date', HTTP_STATUS.BAD_REQUEST);
+    throw new AppError('Check-out date/time must be after check-in date/time', HTTP_STATUS.BAD_REQUEST);
   }
 
-  // Calculate total nights
-  const totalNights = Math.ceil((checkOut - checkIn) / (1000 * 60 * 60 * 24));
+  // 🔥 NEW: Check room availability for the time period
+  const availabilityCheck = await checkRoomAvailability(roomId, checkIn, checkOut, bookingType);
+  if (!availabilityCheck.available) {
+    throw new AppError(
+      `Room is already booked for this time period (Booking #${availabilityCheck.conflictingBooking.bookingNumber})`,
+      HTTP_STATUS.CONFLICT
+    );
+  }
 
-  // Calculate pricing
-  let roomCharges = room.pricing.basePrice * totalNights;
+  // 🔥 UPDATED: Calculate pricing based on booking type
+  let roomCharges = 0;
+  let duration = 0;
 
-  // Add extra guest charges
+  if (bookingType === 'hourly') {
+    // Hourly booking calculation
+    duration = hours;
+    roomCharges = room.pricing.hourlyRate * hours;
+  } else {
+    // Daily booking calculation
+    duration = Math.ceil((checkOut - checkIn) / (1000 * 60 * 60 * 24));
+    roomCharges = room.pricing.basePrice * duration;
+  }
+
+  // Add extra guest charges (only for daily bookings)
   let extraCharges = 0;
-  if (numberOfGuests.adults > room.capacity.adults) {
-    const extraAdults = numberOfGuests.adults - room.capacity.adults;
-    extraCharges += extraAdults * (room.pricing.extraAdultCharge || 0) * totalNights;
-  }
-  if (numberOfGuests.children > room.capacity.children) {
-    const extraChildren = numberOfGuests.children - room.capacity.children;
-    extraCharges += extraChildren * (room.pricing.extraChildCharge || 0) * totalNights;
+  if (bookingType === 'daily') {
+    if (numberOfGuests.adults > room.capacity.adults) {
+      const extraAdults = numberOfGuests.adults - room.capacity.adults;
+      extraCharges += extraAdults * (room.pricing.extraAdultCharge || 0) * duration;
+    }
+    if (numberOfGuests.children > room.capacity.children) {
+      const extraChildren = numberOfGuests.children - room.capacity.children;
+      extraCharges += extraChildren * (room.pricing.extraChildCharge || 0) * duration;
+    }
   }
 
   const subtotal = roomCharges + extraCharges;
@@ -86,7 +151,17 @@ export const createBooking = asyncHandler(async (req, res) => {
   const booking = await Booking.create({
     hotel: assignedHotel,
     room: roomId,
-    guest,
+    bookingType, // 🔥 NEW
+    hours: bookingType === 'hourly' ? hours : undefined, // 🔥 NEW
+    guest: {
+      ...guest,
+      idProof: {
+        ...guest.idProof,
+        image: {
+          url: guest.idProof?.imageBase64,
+        },
+      },
+    },
     numberOfGuests,
     dates: {
       checkIn,
@@ -104,6 +179,7 @@ export const createBooking = asyncHandler(async (req, res) => {
     advancePayment: advancePayment || 0,
     specialRequests,
     createdBy: req.user._id,
+    source: source || 'Direct',
   });
 
   // Update room status to reserved
@@ -211,14 +287,13 @@ export const checkOutGuest = asyncHandler(async (req, res) => {
     throw new AppError('Guest must be checked in to check out', HTTP_STATUS.BAD_REQUEST);
   }
 
-  // 🔒 Payment must be cleared before checkout
-if (booking.paymentStatus !== PAYMENT_STATUS.PAID) {
-  throw new AppError(
-    'Complete payment before checkout',
-    HTTP_STATUS.BAD_REQUEST
-  );
-}
-
+  // Payment must be cleared before checkout
+  if (booking.paymentStatus !== PAYMENT_STATUS.PAID) {
+    throw new AppError(
+      'Complete payment before checkout',
+      HTTP_STATUS.BAD_REQUEST
+    );
+  }
 
   // Update booking
   booking.status = BOOKING_STATUS.CHECKED_OUT;
@@ -259,6 +334,7 @@ export const getAllBookings = asyncHandler(async (req, res) => {
     hotel,
     status,
     search,
+    bookingType, // 🔥 NEW filter
   } = req.query;
 
   // Build query
@@ -271,10 +347,17 @@ export const getAllBookings = asyncHandler(async (req, res) => {
     query.hotel = hotel;
   }
 
+  // Filter by status
   if (status) {
     query.status = status;
   }
 
+  // 🔥 NEW: Filter by booking type
+  if (bookingType && ['daily', 'hourly'].includes(bookingType)) {
+    query.bookingType = bookingType;
+  }
+
+  // Search by booking number, guest name, or phone
   if (search) {
     query.$or = [
       { bookingNumber: new RegExp(search, 'i') },
@@ -407,6 +490,10 @@ export const markNoShow = asyncHandler(async (req, res) => {
 
 
 /* ---------------- UPDATE PAYMENT ---------------- */
+
+/**
+ * Update Payment
+ */
 export const updatePayment = asyncHandler(async (req, res) => {
   const { amount, status } = req.body;
 
@@ -453,73 +540,228 @@ export const updatePayment = asyncHandler(async (req, res) => {
   );
 });
 
-
+/**
+ * Download Invoice PDF
+ * 🔥 UPDATED: Shows duration based on booking type
+ */
 export const downloadInvoicePDF = asyncHandler(async (req, res) => {
   const booking = await Booking.findById(req.params.id)
-    .populate('hotel')
-    .populate('room')
-    .populate('createdBy');
+    .populate('hotel', 'name address gstin contact email')
+    .populate('room', 'roomNumber roomType')
+    .populate('createdBy', 'name')
+    .populate('checkedInBy', 'name')
+    .populate('checkedOutBy', 'name');
 
   if (!booking) {
     throw new AppError('Booking not found', HTTP_STATUS.NOT_FOUND);
   }
 
   if (booking.status !== 'checked_out') {
-    throw new AppError(
-      'Invoice available only after checkout',
-      HTTP_STATUS.BAD_REQUEST
-    );
+    throw new AppError('Invoice available only after checkout', HTTP_STATUS.BAD_REQUEST);
   }
 
-  const doc = new PDFDocument({ size: 'A4', margin: 50 });
+  const doc = new PDFDocument({
+    size: 'A4',
+    margin: 50,
+    layout: 'portrait',
+    bufferPages: true,
+  });
 
+  res.setHeader('Content-Type', 'application/pdf');
   res.setHeader(
     'Content-Disposition',
-    `attachment; filename=Invoice-${booking.bookingNumber}.pdf`
+    `attachment; filename=Invoice-${booking.bookingNumber}-${new Date().toISOString().split('T')[0]}.pdf`
   );
-  res.setHeader('Content-Type', 'application/pdf');
 
   doc.pipe(res);
 
-  /* -------- HEADER -------- */
-  doc.fontSize(20).text('INVOICE', { align: 'center' });
-  doc.moveDown();
+  // Header
+  doc
+    .fontSize(28)
+    .font('Helvetica-Bold')
+    .fillColor('#00ADB5')
+    .text(booking.hotel?.name || 'Hotel Name', { align: 'center' });
 
-  /* -------- HOTEL -------- */
-  doc.fontSize(14).text(booking.hotel.name);
-  doc.fontSize(10).text(
-    `${booking.hotel.address?.street || ''}, ${booking.hotel.address?.city || ''}`
-  );
+  doc
+    .fontSize(11)
+    .fillColor('#333')
+    .text(
+      `${booking.hotel?.address?.street || ''}, ${booking.hotel?.address?.city || ''}, ${booking.hotel?.address?.state || ''} - ${booking.hotel?.address?.pincode || ''}`,
+      { align: 'center' }
+    );
 
-  doc.moveDown();
+  if (booking.hotel?.gstin) {
+    doc.fontSize(10).text(`GSTIN: ${booking.hotel.gstin}`, { align: 'center' });
+  }
 
-  /* -------- BOOKING INFO -------- */
-  doc.text(`Invoice No: ${booking.bookingNumber}`);
-  doc.text(`Guest: ${booking.guest.name}`);
-  doc.text(`Room: ${booking.room.roomNumber}`);
-  doc.text(
-    `Stay: ${new Date(booking.dates.checkIn).toDateString()} - ${new Date(
-      booking.dates.checkOut
-    ).toDateString()}`
-  );
-
-  doc.moveDown();
-
-  /* -------- CHARGES -------- */
-  doc.text(`Room Charges: ₹${booking.pricing.roomCharges}`);
-  doc.text(`GST: ₹${booking.pricing.tax}`);
-  doc.fontSize(12).text(`Total: ₹${booking.pricing.total}`, {
-    underline: true,
-  });
-
-  doc.moveDown();
-  doc.text(`Paid: ₹${booking.advancePayment}`);
-  doc.text(`Payment Status: ${booking.paymentStatus}`);
+  if (booking.hotel?.contact) {
+    doc.text(`Contact: +91 ${booking.hotel.contact} | ${booking.hotel?.email || ''}`, { align: 'center' });
+  }
 
   doc.moveDown(2);
-  doc.fontSize(10).text('Thank you for staying with us!', {
-    align: 'center',
-  });
+
+  // Invoice Title
+  doc
+    .fontSize(22)
+    .fillColor('#333')
+    .font('Helvetica-Bold')
+    .text('TAX INVOICE', { align: 'center' });
+
+  doc.moveDown(0.5);
+
+  doc
+    .fontSize(11)
+    .text(`Invoice No: ${booking.bookingNumber}`, { continued: true })
+    .text(`          Date: ${new Date().toLocaleDateString('en-IN')}`, { align: 'right' });
+
+  doc.moveDown(1);
+
+  // Guest & Booking Info
+  const leftColumn = 50;
+  const rightColumn = 300;
+
+  doc.fontSize(12).font('Helvetica-Bold').text('Bill To:', leftColumn);
+
+  doc
+    .font('Helvetica')
+    .text(booking.guest?.name || 'Guest Name', leftColumn, doc.y + 5);
+
+  doc.text(`Phone: ${booking.guest?.phone || '—'}`, leftColumn);
+  if (booking.guest?.email) doc.text(`Email: ${booking.guest.email}`, leftColumn);
+
+  if (booking.guest?.idProof?.type && booking.guest?.idProof?.number) {
+    doc.text(
+      `ID Proof: ${booking.guest.idProof.type.toUpperCase()} - ${booking.guest.idProof.number}`,
+      leftColumn
+    );
+  }
+
+  // Right side - Booking Info
+  doc.font('Helvetica-Bold').text('Booking Details:', rightColumn);
+
+  doc
+    .font('Helvetica')
+    .text(`Room: ${booking.room?.roomNumber} (${booking.room?.roomType})`, rightColumn, doc.y + 5);
+
+  // 🔥 UPDATED: Show duration based on booking type
+  const durationText = booking.getFormattedDuration();
+  
+  if (booking.bookingType === 'hourly') {
+    doc.text(
+      `Check-in: ${new Date(booking.dates.checkIn).toLocaleString('en-IN')}`,
+      rightColumn
+    );
+    doc.text(
+      `Check-out: ${new Date(booking.dates.checkOut).toLocaleString('en-IN')}`,
+      rightColumn
+    );
+    doc.text(`Duration: ${durationText}`, rightColumn);
+  } else {
+    doc.text(
+      `Stay Period: ${new Date(booking.dates.checkIn).toLocaleDateString('en-IN')} to ${new Date(booking.dates.checkOut).toLocaleDateString('en-IN')}`,
+      rightColumn
+    );
+    doc.text(`Duration: ${durationText}`, rightColumn);
+  }
+
+  doc.text(`Status: ${booking.status.replace('_', ' ').toUpperCase()}`, rightColumn);
+
+  doc.moveDown(2);
+
+  // Charges Table
+  const tableTop = doc.y;
+  const rowHeight = 30;
+
+  // Table Header
+  doc
+    .font('Helvetica-Bold')
+    .fontSize(11)
+    .fillColor('#fff')
+    .rect(50, tableTop, 495, rowHeight)
+    .fill('#00ADB5');
+
+  doc
+    .fillColor('#fff')
+    .text('Description', 60, tableTop + 10)
+    .text('Amount (₹)', 460, tableTop + 10, { align: 'right' });
+
+  let currentY = tableTop + rowHeight;
+
+  // Room Charges
+  doc
+    .font('Helvetica')
+    .fontSize(11)
+    .fillColor('#333')
+    .text(`Room Charges (${durationText})`, 60, currentY + 10)
+    .text(`₹${booking.pricing?.roomCharges?.toLocaleString('en-IN') || '0'}`, 460, currentY + 10, { align: 'right' });
+
+  currentY += rowHeight;
+
+  // Extra Charges
+  if (booking.pricing?.extraCharges > 0) {
+    doc
+      .text('Extra Guest Charges', 60, currentY + 10)
+      .text(`₹${booking.pricing.extraCharges.toLocaleString('en-IN')}`, 460, currentY + 10, { align: 'right' });
+    currentY += rowHeight;
+  }
+
+  // GST
+  doc
+    .text('GST (5%)', 60, currentY + 10)
+    .text(`₹${booking.pricing?.tax?.toLocaleString('en-IN') || '0'}`, 460, currentY + 10, { align: 'right' });
+
+  currentY += rowHeight;
+
+  // Grand Total
+  const total = booking.pricing?.total || 0;
+  
+  doc.rect(50, currentY, 495, rowHeight).fill('#f8f9fa');
+
+  doc
+    .font('Helvetica-Bold')
+    .fontSize(12)
+    .text('GRAND TOTAL', 60, currentY + 10)
+    .text(`₹${total.toLocaleString('en-IN')}`, 460, currentY + 10, { align: 'right' });
+
+  currentY += rowHeight + 30;
+
+  // Payment Summary
+  const paid = booking.advancePayment || 0;
+  const due = Math.max(0, total - paid);
+
+  doc.font('Helvetica-Bold').fontSize(14).text('Payment Summary', 50, currentY);
+
+  currentY += 30;
+
+  doc
+    .font('Helvetica')
+    .fontSize(11)
+    .text('Amount Paid:', 60, currentY)
+    .text(`₹${paid.toLocaleString('en-IN')}`, 460, currentY, { align: 'right' });
+
+  currentY += 25;
+
+  doc
+    .text('Balance Due:', 60, currentY)
+    .text(`₹${due.toLocaleString('en-IN')}`, 460, currentY, { align: 'right' });
+
+  currentY += 40;
+
+  // Footer
+  doc
+    .fontSize(12)
+    .fillColor('#00ADB5')
+    .text('Thank you for choosing us!', 50, currentY, { align: 'center' });
+
+  doc
+    .fontSize(10)
+    .fillColor('#666')
+    .text(
+      'This is a computer-generated invoice and does not require a physical signature.',
+      50,
+      currentY + 25,
+      { align: 'center' }
+    );
 
   doc.end();
 });

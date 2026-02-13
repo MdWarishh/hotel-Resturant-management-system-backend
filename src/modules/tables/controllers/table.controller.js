@@ -40,6 +40,26 @@ export const createTable = asyncHandler(async (req, res) => {
  * GET /api/tables?hotel=HOTEL_ID
  */
 export const getTables = asyncHandler(async (req, res) => {
+  const { id } = req.params; //
+
+  // 1. Logic for Single Table (Details Page)
+  if (id) {
+    const table = await Table.findById(id);
+    
+    if (!table) {
+      throw new AppError('Table not found', HTTP_STATUS.NOT_FOUND);
+    }
+
+    // Return single table object
+    return successResponse(
+      res, 
+      HTTP_STATUS.OK, 
+      'Table fetched successfully', 
+      { table } 
+    );
+  }
+
+  // 2. Logic for All Tables (List Page)
   const hotelId =
     req.user.role === USER_ROLES.SUPER_ADMIN
       ? req.query.hotel
@@ -57,7 +77,7 @@ export const getTables = asyncHandler(async (req, res) => {
     res,
     HTTP_STATUS.OK,
     'Tables fetched successfully',
-    tables
+    { tables }
   );
 });
 
@@ -80,6 +100,12 @@ export const updateTable = asyncHandler(async (req, res) => {
     throw new AppError('Access denied', HTTP_STATUS.FORBIDDEN);
   }
 
+  // FIX: Ensure capacity is a valid number if it's being updated
+  if (req.body.capacity !== undefined) {
+    req.body.capacity = Number(req.body.capacity);
+  }
+
+  // Update fields and save
   Object.assign(table, req.body);
   await table.save();
 
@@ -124,5 +150,35 @@ export const updateTableStatus = asyncHandler(async (req, res) => {
     HTTP_STATUS.OK,
     'Table status updated',
     { table }
+  );
+});
+
+
+/**
+ * DELETE TABLE
+ * DELETE /api/tables/:id
+ */
+export const deleteTable = asyncHandler(async (req, res) => {
+  const table = await Table.findById(req.params.id);
+
+  if (!table) {
+    throw new AppError('Table not found', HTTP_STATUS.NOT_FOUND);
+  }
+
+  // 🔒 Hotel access check
+  if (
+    req.user.role !== USER_ROLES.SUPER_ADMIN &&
+    table.hotel.toString() !== req.user.hotel._id.toString()
+  ) {
+    throw new AppError('Access denied', HTTP_STATUS.FORBIDDEN);
+  }
+
+  // Use findByIdAndDelete to remove the record
+  await Table.findByIdAndDelete(req.params.id);
+
+  return successResponse(
+    res,
+    HTTP_STATUS.OK,
+    'Table deleted successfully'
   );
 });

@@ -20,6 +20,48 @@ const bookingSchema = new mongoose.Schema(
       required: true,
       index: true,
     },
+    
+    // 🔥 NEW: Booking Type
+    bookingType: {
+      type: String,
+      enum: ['daily', 'hourly'],
+      default: 'daily',
+      required: true,
+      index: true,
+    },
+    
+    // 🔥 NEW: Hours (for hourly bookings)
+    hours: {
+      type: Number,
+      min: 1,
+      max: 12, // Maximum 12 hours per booking
+      validate: {
+        validator: function(value) {
+          // Hours required only for hourly bookings
+          if (this.bookingType === 'hourly') {
+            return value != null && value >= 1 && value <= 12;
+          }
+          return true;
+        },
+        message: 'Hours must be between 1 and 12 for hourly bookings'
+      }
+    },
+    
+    source: {
+      type: String,
+      enum: ['Direct', 'OYO', 'MakeMyTrip', 'Booking.com', 'Goibibo', 'Airbnb', 'Agoda', 'Other'],
+      default: 'Direct',
+      required: true,
+      index: true,
+    },
+    
+    invoiceNumber: {
+      type: String,
+      unique: true,
+      sparse: true,
+      uppercase: true,
+    },
+    
     guest: {
       name: {
         type: String,
@@ -46,6 +88,10 @@ const bookingSchema = new mongoose.Schema(
           enum: ['aadhar', 'passport', 'driving_license', 'voter_id'],
         },
         number: String,
+        image: {
+          public_id: { type: String },
+          url: { type: String },
+        },
       },
       address: {
         street: String,
@@ -54,6 +100,7 @@ const bookingSchema = new mongoose.Schema(
         pincode: String,
       },
     },
+    
     numberOfGuests: {
       adults: {
         type: Number,
@@ -66,6 +113,7 @@ const bookingSchema = new mongoose.Schema(
         min: 0,
       },
     },
+    
     dates: {
       checkIn: {
         type: Date,
@@ -84,6 +132,7 @@ const bookingSchema = new mongoose.Schema(
         default: null,
       },
     },
+    
     pricing: {
       roomCharges: {
         type: Number,
@@ -102,54 +151,63 @@ const bookingSchema = new mongoose.Schema(
       },
       subtotal: {
         type: Number,
-        // required: true,
       },
+      taxableAmount: { type: Number, min: 0 },
+      cgstAmount: { type: Number, default: 0, min: 0 },
+      sgstAmount: { type: Number, default: 0, min: 0 },
+      igstAmount: { type: Number, default: 0, min: 0 },
+      gstRate: { type: Number, min: 0 },
       tax: {
         type: Number,
-        // required: true,
       },
       total: {
         type: Number,
-        // required: true,
       },
     },
+    
     status: {
       type: String,
       enum: Object.values(BOOKING_STATUS),
       default: BOOKING_STATUS.PENDING,
       index: true,
     },
+    
     paymentStatus: {
       type: String,
       enum: Object.values(PAYMENT_STATUS),
       default: PAYMENT_STATUS.PENDING,
       index: true,
     },
+    
     advancePayment: {
       type: Number,
       default: 0,
       min: 0,
     },
+    
     specialRequests: {
       type: String,
       maxlength: 500,
       default: '',
     },
+    
     notes: {
       type: String,
       maxlength: 500,
       default: '',
     },
+    
     createdBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',
-      // required: true,
     },
+    
     checkedInBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',
       default: null,
     },
+    
     checkedOutBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',
@@ -165,7 +223,7 @@ const bookingSchema = new mongoose.Schema(
 bookingSchema.index({ hotel: 1, status: 1 });
 bookingSchema.index({ hotel: 1, 'dates.checkIn': 1 });
 bookingSchema.index({ hotel: 1, 'dates.checkOut': 1 });
-bookingSchema.index({ 'guest.phone': 1 });
+bookingSchema.index({ hotel: 1, room: 1, 'dates.checkIn': 1, 'dates.checkOut': 1 }); // 🔥 NEW
 
 // Generate booking number
 bookingSchema.pre('save', async function () {
@@ -178,13 +236,35 @@ bookingSchema.pre('save', async function () {
   }
 });
 
-// Method to calculate total nights
-bookingSchema.methods.getTotalNights = function () {
+// 🔥 UPDATED: Calculate duration (nights or hours)
+bookingSchema.methods.getDuration = function () {
+  if (this.bookingType === 'hourly') {
+    return this.hours;
+  }
+  
+  // For daily bookings, calculate nights
   const checkIn = new Date(this.dates.checkIn);
   const checkOut = new Date(this.dates.checkOut);
   const diffTime = Math.abs(checkOut - checkIn);
   const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
   return diffDays;
+};
+
+// Method to calculate total nights (backward compatibility)
+bookingSchema.methods.getTotalNights = function () {
+  if (this.bookingType === 'hourly') {
+    return 0; // Hourly bookings don't have nights
+  }
+  return this.getDuration();
+};
+
+// 🔥 NEW: Get formatted duration string
+bookingSchema.methods.getFormattedDuration = function () {
+  if (this.bookingType === 'hourly') {
+    return `${this.hours} Hour${this.hours > 1 ? 's' : ''}`;
+  }
+  const nights = this.getDuration();
+  return `${nights} Night${nights > 1 ? 's' : ''}`;
 };
 
 // Method to check if booking is active

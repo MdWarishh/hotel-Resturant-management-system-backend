@@ -17,7 +17,7 @@ const orderSchema = new mongoose.Schema(
     },
     orderType: {
       type: String,
-      enum: ['dine-in', 'room-service', 'takeaway'],
+      enum: ['dine-in', 'room-service', 'takeaway', 'delivery'],
       required: true,
       default: 'dine-in',
       index: true,
@@ -50,6 +50,7 @@ const orderSchema = new mongoose.Schema(
         lowercase: true,
         trim: true,
       },
+         address: { type: String, maxlength: 300 },
     },
     items: [
       {
@@ -182,7 +183,6 @@ payment: {
     createdBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',
-      required: true,
     },
     preparedBy: {
       type: mongoose.Schema.Types.ObjectId,
@@ -194,6 +194,11 @@ payment: {
       ref: 'User',
       default: null,
     },
+    isPublicOrder: {
+  type: Boolean,
+  default: false,
+  index: true,
+},
   },
   {
     timestamps: true,
@@ -206,6 +211,7 @@ orderSchema.index({ hotel: 1, orderType: 1 });
 orderSchema.index({ hotel: 1, createdAt: -1 });
 orderSchema.index({ booking: 1 });
 orderSchema.index({ room: 1 });
+orderSchema.index({ hotel: 1, isPublicOrder: 1 }); 
 
 // Generate order number
 orderSchema.pre('save', async function () {
