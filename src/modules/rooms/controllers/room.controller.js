@@ -63,9 +63,11 @@ export const createRoom = asyncHandler(async (req, res) => {
     createdBy: req.user._id,
   });
 
-  // Update hotel's total rooms count
-  hotelExists.totalRooms += 1;
-  await hotelExists.save();
+  // ✅ FIXED: Update hotel's total rooms count using updateOne (bypasses validation)
+  await Hotel.updateOne(
+    { _id: assignedHotel },
+    { $inc: { totalRooms: 1 } }
+  );
 
   const populatedRoom = await Room.findById(room._id).populate('hotel', 'name code');
 
@@ -99,10 +101,9 @@ export const getAllRooms = asyncHandler(async (req, res) => {
   // If not super admin, only show their hotel's rooms
   if (req.user.role !== USER_ROLES.SUPER_ADMIN) {
     query.hotel = req.user.hotel._id;
-  }else if (hotel && mongoose.Types.ObjectId.isValid(hotel)) {
-  query.hotel = hotel;
-}
-
+  } else if (hotel && mongoose.Types.ObjectId.isValid(hotel)) {
+    query.hotel = hotel;
+  }
 
   // Apply filters
   if (roomType) {
@@ -229,7 +230,6 @@ export const updateRoom = asyncHandler(async (req, res) => {
       isPrimary: img.isPrimary || false
     }));
   }
-  
 
   // Update room
   const updatedRoom = await Room.findByIdAndUpdate(id, updateData, {
@@ -275,12 +275,11 @@ export const deleteRoom = asyncHandler(async (req, res) => {
   room.isActive = false;
   await room.save();
 
-  // Update hotel's total rooms count
-  const hotel = await Hotel.findById(room.hotel);
-  if (hotel) {
-    hotel.totalRooms = Math.max(0, hotel.totalRooms - 1);
-    await hotel.save();
-  }
+  // ✅ FIXED: Update hotel's total rooms count using updateOne
+  await Hotel.updateOne(
+    { _id: room.hotel },
+    { $inc: { totalRooms: -1 } }
+  );
 
   return successResponse(res, HTTP_STATUS.OK, 'Room deleted successfully');
 });
@@ -352,9 +351,8 @@ export const getAvailableRooms = asyncHandler(async (req, res) => {
   if (req.user.role !== USER_ROLES.SUPER_ADMIN) {
     query.hotel = req.user.hotel._id;
   } else if (hotel && mongoose.Types.ObjectId.isValid(hotel)) {
-  query.hotel = hotel;
-}
-
+    query.hotel = hotel;
+  }
 
   if (roomType) {
     query.roomType = roomType;

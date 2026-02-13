@@ -50,11 +50,14 @@ const roomSchema = new mongoose.Schema(
         min: [0, 'Price cannot be negative'],
       },
       
-      // 🔥 NEW: Hourly pricing
+      // 🔥 UPDATED: Hourly pricing with smart default
       hourlyRate: {
         type: Number,
         min: [0, 'Hourly rate cannot be negative'],
-        default: 0,
+        default: function() {
+          // Auto-calculate hourly rate as 40% of daily rate
+          return this.basePrice ? Math.ceil(this.basePrice * 0.4) : 0;
+        },
       },
       
       extraAdultCharge: {
@@ -114,10 +117,10 @@ const roomSchema = new mongoose.Schema(
         default: 'attached',
       },
       
-      // 🔥 NEW: Support hourly bookings
+      // 🔥 UPDATED: Hourly booking enabled by default
       allowHourlyBooking: {
         type: Boolean,
-        default: false,
+        default: true, // Changed from false to true
       },
     },
     images: [
@@ -194,7 +197,8 @@ roomSchema.methods.isOccupied = function () {
 // 🔥 UPDATED: Get current price based on booking type
 roomSchema.methods.getCurrentPrice = function (bookingType = 'daily', isWeekend = false) {
   if (bookingType === 'hourly') {
-    return this.pricing.hourlyRate || 0;
+    // If hourlyRate is 0, auto-calculate as 40% of basePrice
+    return this.pricing.hourlyRate || Math.ceil(this.pricing.basePrice * 0.4);
   }
   
   // For daily bookings
@@ -204,9 +208,10 @@ roomSchema.methods.getCurrentPrice = function (bookingType = 'daily', isWeekend 
   return this.pricing.basePrice;
 };
 
-// 🔥 NEW: Check if room supports hourly bookings
+// 🔥 UPDATED: Check if room supports hourly bookings (always true now)
 roomSchema.methods.supportsHourlyBooking = function () {
-  return this.features.allowHourlyBooking && this.pricing.hourlyRate > 0;
+  // If allowHourlyBooking is true OR if room has basePrice (auto-calculate hourly)
+  return this.features.allowHourlyBooking || this.pricing.basePrice > 0;
 };
 
 const Room = mongoose.model('Room', roomSchema);

@@ -14,31 +14,26 @@ const app = express();
 // Middleware
 // 1. DYNAMIC CORS SETUP (Local aur Deployed Netlify dono ke liye)
 const allowedOrigins = [
-  'http://localhost:3000',                                    // Local development
-  'https://6980e96a90579a4b376914ad--joyful-panda-706784.netlify.app',  // Tera current Netlify deploy preview
-  // Agar custom domain hai future me, yaha add kar: 'https://amulyarestaurant.com'
-  'https://hotel-resturant-mangement-system-fr.vercel.app',
-  // Ya agar Netlify main domain: 'https://joyful-panda-706784.netlify.app'
-  /^https:\/\/.*\.netlify\.app$/,
-];
+  'http://localhost:3000',
+  'https://fusionpos.in'
+].filter(Boolean);
+
 
 app.use(
   cors({
     origin: function (origin, callback) {
-      // Allow requests with no origin (like mobile apps, Postman, curl)
       if (!origin) return callback(null, true);
 
-      // Check if origin is in allowed list
       if (allowedOrigins.includes(origin)) {
         callback(null, true);
       } else {
         callback(new Error('Not allowed by CORS'));
       }
     },
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],  // All needed methods
-    credentials: true,  // Cookies/auth headers allow karne ke liye
+    credentials: true,
   })
 );
+
 
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ limit: '10mb', extended: true }));
