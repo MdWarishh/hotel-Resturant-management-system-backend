@@ -20,20 +20,26 @@ const allowedOrigins = [
 
 // new thing 
 
-app.use(
-  cors({
-    origin: function (origin, callback) {
-      if (!origin) return callback(null, true);
+app.use(cors({
+  origin: function (origin, callback) {
+    if (!origin) return callback(null, true);
 
-      if (allowedOrigins.includes(origin)) {
-        callback(null, true);
-      } else {
-        callback(new Error('Not allowed by CORS'));
-      }
-    },
-    credentials: true,
-  })
-);
+    const allowed = [
+      'http://localhost:3000',
+      'https://fusionpos.in',
+      'https://www.fusionpos.in'
+    ];
+
+    if (allowed.includes(origin)) {
+      callback(null, true);
+    } else {
+      console.log('Blocked by CORS:', origin);
+      callback(null, false);
+    }
+  },
+  credentials: true
+}));
+
 
 
 app.use(express.json({ limit: '10mb' }));
