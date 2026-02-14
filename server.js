@@ -14,32 +14,29 @@ const app = express();
 // Middleware
 // 1. DYNAMIC CORS SETUP (Local aur Deployed Netlify dono ke liye)
 // Optimized CORS for Production
+
 const allowedOrigins = [
   'http://localhost:3000',
   'https://fusionpos.in',
   'https://www.fusionpos.in'
 ];
 
-app.use(cors({
-  origin: allowedOrigins,
+const corsOptions = {
+  origin: function (origin, callback) {
+    if (!origin || allowedOrigins.indexOf(origin) !== -1) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
   credentials: true,
-}));
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
+};
 
-app.use((req, res, next) => {
-  res.header("Access-Control-Allow-Origin", req.headers.origin);
-  res.header("Access-Control-Allow-Credentials", "true");
-  res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept, Authorization");
-  res.header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
-  if (req.method === "OPTIONS") {
-    return res.sendStatus(204);
-  }
-  next();
-});
+// Use cors middleware EARLY (sabse upar, routes se pehle)
+app.use(cors(corsOptions));
 
-
-
-// Explicitly handle OPTIONS preflight for all routes
-// app.options('/:any*', cors());
 
 
 
