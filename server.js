@@ -14,6 +14,8 @@ const app = express();
 // ============================================
 // CORS CONFIGURATION (Hostinger + Vercel Fix)
 // ============================================
+console.log("MONGO URI:", process.env.MONGO_URI);
+console.log("MONGODB_URI:", process.env.MONGODB_URI);
 
 const allowedOrigins = [
   'http://localhost:3000',
