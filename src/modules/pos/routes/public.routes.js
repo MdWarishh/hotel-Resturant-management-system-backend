@@ -33,6 +33,13 @@ const router = express.Router();
  * These routes are accessible without login
  * Used for public menu viewing and ordering
  */
+router.get('/', (req, res) => {
+  res.json({
+    success: true,
+    message: 'Public API is working 🚀'
+  });
+});
+
 
 // ============================================
 // HOTEL ROUTES
