@@ -16,7 +16,7 @@ import {
   validateRoomId,
 } from '../validators/room.validator.js';
 import { USER_ROLES } from '../../../config/constants.js';
-
+import bulkUploadRoutes from './bulkUpload.routes.js';
 const router = express.Router();
 
 /**
@@ -80,5 +80,12 @@ router.delete(
   authorize(USER_ROLES.SUPER_ADMIN, USER_ROLES.HOTEL_ADMIN),
   deleteRoom
 );
+
+
+// Add this line with your other route registrations:
+router.use('/bulk-upload', bulkUploadRoutes);
+
+// Or if you have a separate routes index file, add:
+// app.use('/api/rooms/bulk-upload', bulkUploadRoutes);
 
 export default router;

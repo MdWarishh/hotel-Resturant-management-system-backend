@@ -69,8 +69,8 @@ import reportsRoutes from './src/modules/reports/routes/reports.routes.js';
 import tableRoutes from './src/modules/tables/routes/table.routes.js';
 import superAdminRoutes from './src/modules/super-admin/routes/superadmin.routes.js';
 
-// ✅ NEW: Import Public Routes (No Authentication Required)
-import publicRoutes from './src/modules/pos/routes/public.routes.js';
+// ✅ NEW: Import AllInOne Routes (No Authentication Required)
+import allinoneRoutes from './src/modules/pos/routes/allinone.routes.js';
 import gstReportsRoutes from './src/modules/reports/routes/gstReports.routes.js';
 
 // Mount API Routes
@@ -86,8 +86,8 @@ app.use('/api/reports', reportsRoutes);
 app.use('/api/tables', tableRoutes);
 app.use('/api/super-admin', superAdminRoutes);
 
-// ✅ NEW: Mount Public Routes (No Auth - For Public Menu & Orders)
-app.use('/api/public', publicRoutes);
+// ✅ NEW: Mount AllInOne Routes (No Auth - For Public Menu & Orders)
+app.use('/api/allinone', allinoneRoutes);
 app.use('/api/reports/gst', gstReportsRoutes); 
 // Add this in your backend server.js
 app.use('/api/uploads', express.static('uploads'));
@@ -142,14 +142,14 @@ posNamespace.on('connection', (socket) => {
 });
 
 // ============================================
-// 🌍 PUBLIC NAMESPACE (NO AUTHENTICATION)
+// 🌐 ALLINONE NAMESPACE (NO AUTHENTICATION)
 // For public order tracking - real-time updates
 // ============================================
-const publicNamespace = io.of('/public');
+const allinoneNamespace = io.of('/allinone');
 
 // NO authentication middleware - anyone can connect
-publicNamespace.on('connection', (socket) => {
-  console.log('✅ Public socket connected:', socket.id);
+allinoneNamespace.on('connection', (socket) => {
+  console.log('✅ AllInOne socket connected:', socket.id);
 
   // Join a room based on order number (optional)
   socket.on('join:order', (orderNumber) => {
@@ -163,7 +163,7 @@ publicNamespace.on('connection', (socket) => {
   });
 
   socket.on('disconnect', () => {
-    console.log('❌ Public socket disconnected:', socket.id);
+    console.log('❌ AllInOne socket disconnected:', socket.id);
   });
 });
 
@@ -175,10 +175,10 @@ app.set('io', io);
 // ============================================
 httpServer.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 Server running on port ${PORT}`);
-  console.log(`🔡 Socket.IO enabled:`);
+  console.log(`📡 Socket.IO enabled:`);
   console.log(`   - /pos (authenticated) for admin/staff`);
-  console.log(`   - /public (no auth) for order tracking`);
-  console.log(`🌍 Public API available at /api/public`);
+  console.log(`   - /allinone (no auth) for order tracking`);
+  console.log(`🌐 AllInOne API available at /api/allinone`);
 });
 
 // Graceful Shutdown
