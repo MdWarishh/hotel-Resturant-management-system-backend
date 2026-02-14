@@ -24,47 +24,55 @@ const allowedOrigins = [
   'https://www.fusionpos.in',
   'https://api.fusionpos.in',
 ];
-app.options('/{*path}', (req, res) => {
-  const origin = req.headers.origin;
-  if (!origin || allowedOrigins.includes(origin)) {
-    res.setHeader('Access-Control-Allow-Origin', origin || '*');
-    res.setHeader('Access-Control-Allow-Credentials', 'true');
-    res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type,Authorization,X-Requested-With,Accept,Origin');
-    res.setHeader('Access-Control-Max-Age', '86400'); // 24 hours cache preflight
-  }
-  res.status(200).end();
-});
+// app.options('/{*path}', (req, res) => {
+//   const origin = req.headers.origin;
+//   if (!origin || allowedOrigins.includes(origin)) {
+//     res.setHeader('Access-Control-Allow-Origin', origin || '*');
+//     res.setHeader('Access-Control-Allow-Credentials', 'true');
+//     res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
+//     res.setHeader('Access-Control-Allow-Headers', 'Content-Type,Authorization,X-Requested-With,Accept,Origin');
+//     res.setHeader('Access-Control-Max-Age', '86400'); // 24 hours cache preflight
+//   }
+//   res.status(200).end();
+// });
 
 // ✅ STEP 2: Har response pe CORS headers manually set karo
-app.use((req, res, next) => {
-  const origin = req.headers.origin;
-  if (!origin || allowedOrigins.includes(origin)) {
-    res.setHeader('Access-Control-Allow-Origin', origin || '*');
-    res.setHeader('Access-Control-Allow-Credentials', 'true');
-    res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type,Authorization,X-Requested-With,Accept,Origin');
-  }
-  next();
-});
-
-// ✅ STEP 3: cors() package bhi use karo (double safety)
+// app.use((req, res, next) => {
+//   const origin = req.headers.origin;
+//   if (!origin || allowedOrigins.includes(origin)) {
+//     res.setHeader('Access-Control-Allow-Origin', origin || '*');
+//     res.setHeader('Access-Control-Allow-Credentials', 'true');
+//     res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
+//     res.setHeader('Access-Control-Allow-Headers', 'Content-Type,Authorization,X-Requested-With,Accept,Origin');
+//   }
+//   next();
+// });
 app.use(cors({
-  origin: function (origin, callback) {
-    if (!origin || allowedOrigins.includes(origin)) {
-      callback(null, origin);
-    } else {
-      console.warn('🚫 CORS blocked:', origin);
-      callback(null, true); // ⚠️ Production me block mat karo - just log karo
-    }
-  },
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin'],
-  optionsSuccessStatus: 200,
+  origin: [
+    "http://localhost:3000",
+    "https://fusionpos.in",
+    "https://www.fusionpos.in"
+  ],
+  credentials: true
 }));
 
-app.options("*", cors()); // 👈 ADD THIS
+app.options("*", cors());
+// ✅ STEP 3: cors() package bhi use karo (double safety)
+// app.use(cors({
+//   origin: function (origin, callback) {
+//     if (!origin || allowedOrigins.includes(origin)) {
+//       callback(null, origin);
+//     } else {
+//       console.warn('🚫 CORS blocked:', origin);
+//       callback(null, true); // ⚠️ Production me block mat karo - just log karo
+//     }
+//   },
+//   credentials: true,
+//   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+//   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin'],
+//   optionsSuccessStatus: 200,
+// }));
+// 👈 ADD THIS
 
 // ============================================
 // BODY PARSER
