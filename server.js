@@ -52,7 +52,7 @@ app.use((req, res, next) => {
 app.use(cors({
   origin: function (origin, callback) {
     if (!origin || allowedOrigins.includes(origin)) {
-      callback(null, true);
+      callback(null, origin);
     } else {
       console.warn('🚫 CORS blocked:', origin);
       callback(null, true); // ⚠️ Production me block mat karo - just log karo
@@ -63,6 +63,8 @@ app.use(cors({
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin'],
   optionsSuccessStatus: 200,
 }));
+
+app.options("*", cors()); // 👈 ADD THIS
 
 // ============================================
 // BODY PARSER
