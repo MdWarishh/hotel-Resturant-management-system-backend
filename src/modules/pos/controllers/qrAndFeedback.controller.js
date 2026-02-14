@@ -25,8 +25,8 @@ export const generateHotelQR = asyncHandler(async (req, res) => {
   }
 
   // Generate public menu URL
-  const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
-  const menuUrl = `${frontendUrl}/public/${hotel.code}`;
+  const frontendUrl = process.env.FRONTEND_URL || 'https://www.fusionpos.in/allinone';
+  const menuUrl = `${frontendUrl}`;
 
   // Generate QR code as data URL
   const qrCodeDataUrl = await QRCode.toDataURL(menuUrl, {

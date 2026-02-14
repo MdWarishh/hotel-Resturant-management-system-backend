@@ -16,6 +16,8 @@ import {
   validateInventoryId,
 } from '../validators/inventory.validator.js';
 import { USER_ROLES } from '../../../config/constants.js';
+import bulkUploadRoutes from './bulkUpload.routes.js';
+
 
 const router = express.Router();
 
@@ -77,5 +79,8 @@ router.get(
   validateInventoryId,
   getStockTransactions
 );
+
+// Bulk upload routes
+router.use('/bulk-upload', bulkUploadRoutes);
 
 export default router;
