@@ -48,14 +48,9 @@ const allowedOrigins = [
 //   next();
 // });
 app.use(cors({
-  origin: [
-    "http://localhost:3000",
-    "https://fusionpos.in",
-    "https://www.fusionpos.in"
-  ],
+  origin: true,
   credentials: true
 }));
-
 app.options("*", cors());
 // ✅ STEP 3: cors() package bhi use karo (double safety)
 // app.use(cors({
