@@ -12,62 +12,37 @@ dotenv.config();
 const app = express();
 
 // ============================================
-// ✅ CORS CONFIGURATION (Hostinger Production Fix)
+// CORS CONFIGURATION (Hostinger + Vercel Fix)
 // ============================================
 
 const allowedOrigins = [
-  // Local development
   'http://localhost:3000',
   'http://localhost:5000',
-  // Production - all variants cover karo
   'https://fusionpos.in',
   'https://www.fusionpos.in',
   'https://api.fusionpos.in',
 ];
-// app.options('/{*path}', (req, res) => {
-//   const origin = req.headers.origin;
-//   if (!origin || allowedOrigins.includes(origin)) {
-//     res.setHeader('Access-Control-Allow-Origin', origin || '*');
-//     res.setHeader('Access-Control-Allow-Credentials', 'true');
-//     res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
-//     res.setHeader('Access-Control-Allow-Headers', 'Content-Type,Authorization,X-Requested-With,Accept,Origin');
-//     res.setHeader('Access-Control-Max-Age', '86400'); // 24 hours cache preflight
-//   }
-//   res.status(200).end();
-// });
 
-// ✅ STEP 2: Har response pe CORS headers manually set karo
-// app.use((req, res, next) => {
-//   const origin = req.headers.origin;
-//   if (!origin || allowedOrigins.includes(origin)) {
-//     res.setHeader('Access-Control-Allow-Origin', origin || '*');
-//     res.setHeader('Access-Control-Allow-Credentials', 'true');
-//     res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
-//     res.setHeader('Access-Control-Allow-Headers', 'Content-Type,Authorization,X-Requested-With,Accept,Origin');
-//   }
-//   next();
-// });
-app.use(cors({
-  origin: true,
-  credentials: true
-}));
-app.options("*", cors());
-// ✅ STEP 3: cors() package bhi use karo (double safety)
-// app.use(cors({
-//   origin: function (origin, callback) {
-//     if (!origin || allowedOrigins.includes(origin)) {
-//       callback(null, origin);
-//     } else {
-//       console.warn('🚫 CORS blocked:', origin);
-//       callback(null, true); // ⚠️ Production me block mat karo - just log karo
-//     }
-//   },
-//   credentials: true,
-//   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-//   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin'],
-//   optionsSuccessStatus: 200,
-// }));
-// 👈 ADD THIS
+const corsOptions = {
+  origin: function (origin, callback) {
+    // Allow no-origin requests (Postman, mobile apps, curl)
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      console.warn('CORS request from unlisted origin:', origin);
+      callback(null, true); // allow anyway, just log
+    }
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin'],
+  optionsSuccessStatus: 200,
+  preflightContinue: false,
+};
+
+// Apply CORS to all routes including preflight OPTIONS
+app.use(cors(corsOptions));
 
 // ============================================
 // BODY PARSER
@@ -75,14 +50,12 @@ app.options("*", cors());
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ limit: '10mb', extended: true }));
 
-// Connect to Database
 connectDB();
 
-// Health Check Route
 app.get('/', (req, res) => {
   res.json({
     success: true,
-    message: 'FusionPOS API is running ✅',
+    message: 'FusionPOS API is running',
     version: '1.0.0',
     timestamp: new Date().toISOString(),
     environment: process.env.NODE_ENV || 'development',
@@ -130,12 +103,8 @@ app.use('/api/uploads', express.static('uploads'));
 app.use((err, req, res, next) => {
   console.error('Error:', err.stack);
 
-  // CORS error handle karo
   if (err.message === 'Not allowed by CORS') {
-    return res.status(403).json({
-      success: false,
-      message: 'CORS: Origin not allowed',
-    });
+    return res.status(403).json({ success: false, message: 'CORS: Origin not allowed' });
   }
 
   res.status(err.statusCode || 500).json({
@@ -149,7 +118,6 @@ app.use((err, req, res, next) => {
 // SERVER + SOCKET.IO
 // ============================================
 const PORT = process.env.PORT || 5000;
-
 const httpServer = createServer(app);
 
 const io = new Server(httpServer, {
@@ -158,7 +126,6 @@ const io = new Server(httpServer, {
     credentials: true,
     methods: ['GET', 'POST'],
   },
-  // ✅ Hostinger pe WebSocket ke liye
   transports: ['websocket', 'polling'],
   allowEIO3: true,
 });
@@ -172,7 +139,6 @@ posNamespace.use((socket, next) => {
   try {
     const token = socket.handshake.auth?.token;
     if (!token) return next(new Error('Unauthorized'));
-
     const decoded = verifyToken(token);
     socket.user = decoded;
     next();
@@ -182,11 +148,8 @@ posNamespace.use((socket, next) => {
 });
 
 posNamespace.on('connection', (socket) => {
-  console.log('✅ POS socket connected:', socket.id, '| User:', socket.user?.name || 'Unknown');
-
-  socket.on('disconnect', () => {
-    console.log('❌ POS socket disconnected:', socket.id);
-  });
+  console.log('POS socket connected:', socket.id, '| User:', socket.user?.name || 'Unknown');
+  socket.on('disconnect', () => console.log('POS socket disconnected:', socket.id));
 });
 
 // ============================================
@@ -195,45 +158,32 @@ posNamespace.on('connection', (socket) => {
 const allinoneNamespace = io.of('/allinone');
 
 allinoneNamespace.on('connection', (socket) => {
-  console.log('✅ AllInOne socket connected:', socket.id);
-
-  socket.on('join:order', (orderNumber) => {
-    socket.join(`order:${orderNumber}`);
-  });
-
-  socket.on('leave:order', (orderNumber) => {
-    socket.leave(`order:${orderNumber}`);
-  });
-
-  socket.on('disconnect', () => {
-    console.log('❌ AllInOne socket disconnected:', socket.id);
-  });
+  console.log('AllInOne socket connected:', socket.id);
+  socket.on('join:order', (orderNumber) => socket.join(`order:${orderNumber}`));
+  socket.on('leave:order', (orderNumber) => socket.leave(`order:${orderNumber}`));
+  socket.on('disconnect', () => console.log('AllInOne socket disconnected:', socket.id));
 });
 
-// Make io available in controllers
 app.set('io', io);
 
 // ============================================
 // START SERVER
 // ============================================
 httpServer.listen(PORT, '0.0.0.0', () => {
-  console.log(`🚀 Server running on port ${PORT}`);
-  console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
-  console.log(`✅ CORS allowed origins:`, allowedOrigins);
+  console.log(`Server running on port ${PORT}`);
+  console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
+  console.log(`CORS allowed origins:`, allowedOrigins);
 });
 
 // Graceful Shutdown
 const gracefulShutdown = async (signal) => {
-  console.log(`\n${signal} received. Starting graceful shutdown...`);
-
+  console.log(`${signal} received. Shutting down...`);
   httpServer.close(async () => {
-    console.log('✅ HTTP server closed');
     try {
       await mongoose.connection.close();
-      console.log('✅ MongoDB connection closed');
       process.exit(0);
     } catch (error) {
-      console.error('❌ Error during shutdown:', error);
+      console.error('Error during shutdown:', error);
       process.exit(1);
     }
   });
