@@ -35,7 +35,7 @@ const hotelSchema = new mongoose.Schema(
       },
       stateCode: {
    type: String,
-   required: true,
+   required: false,
    match: [/^[0-9]{2}$/, 'State code must be 2 digits (01-37)'],
  },
       state: {

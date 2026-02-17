@@ -97,8 +97,8 @@ app.use('/api/tables', tableRoutes);
 app.use('/api/super-admin', superAdminRoutes);
 app.use('/api/allinone', allinoneRoutes);
 app.use('/api/reports/gst', gstReportsRoutes);
+app.use('/uploads', express.static('uploads'));
 app.use('/api/uploads', express.static('uploads'));
-
 // ============================================
 // GLOBAL ERROR HANDLER
 // ============================================
