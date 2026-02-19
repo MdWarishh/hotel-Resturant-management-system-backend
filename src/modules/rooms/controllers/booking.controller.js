@@ -117,15 +117,26 @@ export const createBooking = asyncHandler(async (req, res) => {
   }
 
   // 🔥 UPDATED: Calculate pricing based on booking type
-  let roomCharges = 0;
+ let roomCharges = 0;
   let duration = 0;
 
   if (bookingType === 'hourly') {
     // Hourly booking calculation
     duration = hours;
-    roomCharges = room.pricing.hourlyRate * hours;
+    
+    // 🔥 NEW: Check if manual hourly rate is provided
+    if (req.body.manualHourlyRate && req.body.manualHourlyRate > 0) {
+      // Use custom/manual hourly rate set by admin
+      roomCharges = req.body.manualHourlyRate * hours;
+    } else {
+      // Use room's default hourly rate or auto-calculate (40% of daily rate)
+      const hourlyRate = room.pricing.hourlyRate > 0 
+        ? room.pricing.hourlyRate 
+        : Math.ceil(room.pricing.basePrice * 0.4);
+      roomCharges = hourlyRate * hours;
+    }
   } else {
-    // Daily booking calculation
+    // Daily booking calculation (unchanged)
     duration = Math.ceil((checkOut - checkIn) / (1000 * 60 * 60 * 24));
     roomCharges = room.pricing.basePrice * duration;
   }
@@ -147,12 +158,27 @@ export const createBooking = asyncHandler(async (req, res) => {
   const tax = Math.ceil((subtotal * GST_RATE) / 100);
   const total = Math.ceil(subtotal + tax);
 
-  // Create booking
+  // 🔥 NEW: Store manual rate if provided (for record keeping)
+  const pricingData = {
+    roomCharges,
+    extraCharges,
+    discount: 0,
+    subtotal,
+    tax,
+    total,
+  };
+
+  // Add manual rate to pricing if it was used
+  if (bookingType === 'hourly' && req.body.manualHourlyRate) {
+    pricingData.manualHourlyRate = req.body.manualHourlyRate; // Store for audit
+  }
+
+  // Create booking (update line 151 onwards)
   const booking = await Booking.create({
     hotel: assignedHotel,
     room: roomId,
-    bookingType, // 🔥 NEW
-    hours: bookingType === 'hourly' ? hours : undefined, // 🔥 NEW
+    bookingType,
+    hours: bookingType === 'hourly' ? hours : undefined,
     guest: {
       ...guest,
       idProof: {
@@ -167,20 +193,14 @@ export const createBooking = asyncHandler(async (req, res) => {
       checkIn,
       checkOut,
     },
-    pricing: {
-      roomCharges,
-      extraCharges,
-      discount: 0,
-      subtotal,
-      tax,
-      total,
-    },
+    pricing: pricingData, // 🔥 UPDATED: Use pricingData with manual rate
     status: BOOKING_STATUS.CONFIRMED,
     advancePayment: advancePayment || 0,
     specialRequests,
     createdBy: req.user._id,
     source: source || 'Direct',
   });
+
 
   // Update room status to reserved
   room.status = ROOM_STATUS.RESERVED;
