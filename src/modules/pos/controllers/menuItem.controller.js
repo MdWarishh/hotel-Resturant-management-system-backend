@@ -1,5 +1,6 @@
 import MenuItem from '../models/MenuItem.model.js';
 import MenuCategory from '../models/MenuCategory.model.js';
+import MenuSubCategory from '../models/MenuSubCategory.model.js';
 import { successResponse, paginatedResponse } from '../../../utils/responseHandler.js';
 import { HTTP_STATUS, PAGINATION, USER_ROLES } from '../../../config/constants.js';
 import asyncHandler from '../../../utils/asyncHandler.js';
@@ -297,24 +298,52 @@ export const deleteMenuItem = asyncHandler(async (req, res) => {
 export const getFullMenu = asyncHandler(async (req, res) => {
   const { hotel } = req.query;
 
-  // Build query
   let assignedHotel = hotel;
   if (req.user.role !== USER_ROLES.SUPER_ADMIN) {
     assignedHotel = req.user.hotel._id;
   }
 
-  // Get all categories
   const categories = await MenuCategory.find({
     hotel: assignedHotel,
     isActive: true,
   }).sort({ displayOrder: 1 });
 
-  // Get all menu items grouped by category
   const menu = await Promise.all(
     categories.map(async (category) => {
-      const items = await MenuItem.find({
+      // ✅ NEW: Get sub-categories for this category
+      const subCategories = await MenuSubCategory.find({
+        category: category._id,
+        isActive: true,
+      }).sort({ displayOrder: 1 });
+
+      // ✅ NEW: Get items for each sub-category
+      const subCategoryItems = await Promise.all(
+        subCategories.map(async (subCat) => {
+          const items = await MenuItem.find({
+            hotel: assignedHotel,
+            subCategory: subCat._id,
+            isActive: true,
+            isAvailable: true,
+          }).sort({ displayOrder: 1, name: 1 });
+
+          return {
+            subCategory: {
+              _id: subCat._id,
+              name: subCat.name,
+              description: subCat.description,
+              image: subCat.image,
+              displayOrder: subCat.displayOrder,
+            },
+            items,
+          };
+        })
+      );
+
+      // ✅ NEW: Get direct items (items without sub-category)
+      const directItems = await MenuItem.find({
         hotel: assignedHotel,
         category: category._id,
+        subCategory: { $in: [null, undefined] },
         isActive: true,
         isAvailable: true,
       }).sort({ displayOrder: 1, name: 1 });
@@ -325,8 +354,10 @@ export const getFullMenu = asyncHandler(async (req, res) => {
           name: category.name,
           description: category.description,
           image: category.image,
+          displayOrder: category.displayOrder,
         },
-        items,
+        subCategories: subCategoryItems,  // ← NEW
+        items: directItems,                // Items without sub-category (optional)
       };
     })
   );

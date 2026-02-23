@@ -14,6 +14,12 @@ const menuItemSchema = new mongoose.Schema(
       required: [true, 'Category is required'],
       index: true,
     },
+      subCategory: {
+  type: mongoose.Schema.Types.ObjectId,
+  ref: 'MenuSubCategory',
+  default: null,
+  index: true,
+},
     name: {
       type: String,
       required: [true, 'Item name is required'],
@@ -147,6 +153,7 @@ const menuItemSchema = new mongoose.Schema(
       ref: 'User',
       required: true,
     },
+  
   },
   {
     timestamps: true,

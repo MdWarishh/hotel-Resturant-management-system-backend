@@ -47,12 +47,16 @@ import {
   validateOrderStatus,
   validateAvailability,
   validateObjectId,
+  validateUpdateSubCategory,
+  validateCreateSubCategory,
 } from '../validators/pos.validator.js';
 
 import { USER_ROLES } from '../../../config/constants.js';
 import { getTodaySummary } from '../controllers/analytics.controller.js';
 import { markOrderPaid } from '../controllers/orderPayment.controller.js';
 import { generateHotelQR, getFeedbackSummary } from '../controllers/qrAndFeedback.controller.js';
+import { createSubCategory, deleteSubCategory, getAllSubCategories, getSubCategoriesByCategory, getSubCategoryById, updateSubCategory } from '../controllers/menuSubCategory.controller.js';
+import bulkUploadRoutes from './bulkUpload.routes.js';
 
 const router = express.Router();
 
@@ -61,6 +65,8 @@ const router = express.Router();
  */
 router.use(protect);
 
+
+router.use('/bulk-upload', bulkUploadRoutes);
 /**
  * ============================================
  * MENU CATEGORY ROUTES
@@ -105,6 +111,13 @@ router.delete(
 
 // Get full menu (grouped by category)
 router.get('/menu', getFullMenu);
+
+router.get('/subcategories', getAllSubCategories);
+router.post('/subcategories',authorize(USER_ROLES.SUPER_ADMIN, USER_ROLES.HOTEL_ADMIN), validateCreateSubCategory, createSubCategory);
+router.get('/categories/:categoryId/subcategories', getSubCategoriesByCategory);
+router.get('/subcategories/:id', validateObjectId, getSubCategoryById);
+router.put('/subcategories/:id', validateObjectId,   authorize(USER_ROLES.SUPER_ADMIN, USER_ROLES.HOTEL_ADMIN), validateUpdateSubCategory, updateSubCategory);
+router.delete('/subcategories/:id', validateObjectId,  authorize(USER_ROLES.SUPER_ADMIN, USER_ROLES.HOTEL_ADMIN), deleteSubCategory);
 
 // Get all menu items
 router.get('/items', getAllMenuItems);

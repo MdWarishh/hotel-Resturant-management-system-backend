@@ -51,7 +51,7 @@ export const ORDER_STATUS = {
   PREPARING: 'preparing',
   READY: 'ready',
   SERVED: 'served',
-   COMPLETED: 'completed', 
+  COMPLETED: 'completed',
   CANCELLED: 'cancelled',
 };
 
@@ -85,8 +85,11 @@ export const INVENTORY_CATEGORIES = {
   FOOD: 'food',
   BEVERAGE: 'beverage',
   SUPPLIES: 'supplies',
+  LINEN: 'linen',
+  TOILETRIES: 'toiletries',
   CLEANING: 'cleaning',
   AMENITIES: 'amenities',
+
 };
 
 // Stock Alert Levels

@@ -322,7 +322,10 @@ export const updateOrderStatus = asyncHandler(async (req, res) => {
       order.preparedBy = req.user._id;
       break;
     case ORDER_STATUS.READY:
+      order.status = ORDER_STATUS.SERVED;
       order.timestamps.ready = new Date();
+  order.timestamps.served = new Date();
+
       break;
     case ORDER_STATUS.SERVED:
       order.timestamps.served = new Date();

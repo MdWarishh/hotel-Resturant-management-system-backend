@@ -48,6 +48,10 @@ router.post(
   createInventoryItem
 );
 
+
+// Bulk upload routes
+router.use('/bulk-upload', bulkUploadRoutes);
+
 // Get single inventory item
 router.get(
   '/:id',
@@ -80,7 +84,6 @@ router.get(
   getStockTransactions
 );
 
-// Bulk upload routes
-router.use('/bulk-upload', bulkUploadRoutes);
+
 
 export default router;

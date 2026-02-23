@@ -315,6 +315,10 @@ export const bulkUploadInventory = asyncHandler(async (req, res) => {
   const existingSKUs = await InventoryItem.find({ hotel: hotelId, sku: { $ne: null } }).select('sku');
   const existingSKUSet = new Set(existingSKUs.map(item => item.sku.toUpperCase()));
 
+  // 🔥 Also check for existing item names to prevent duplicates
+  const existingNames = await InventoryItem.find({ hotel: hotelId }).select('name');
+  const existingNamesSet = new Set(existingNames.map(item => item.name.toLowerCase().trim()));
+
   // Valid values
   const validCategories = Object.values(INVENTORY_CATEGORIES);
   const validUnits = ['kg', 'g', 'l', 'ml', 'pcs', 'box', 'packet', 'bottle', 'can'];
@@ -353,6 +357,15 @@ export const bulkUploadInventory = asyncHandler(async (req, res) => {
       const errors = [];
 
       if (!name || name.length < 2) errors.push('Item name required (min 2 characters)');
+      
+      // 🔥 Check for duplicate item name
+      const normalizedName = name.toLowerCase().trim();
+      if (existingNamesSet.has(normalizedName)) {
+        errors.push(`Item "${name}" already exists in inventory`);
+      } else {
+        existingNamesSet.add(normalizedName); // Prevent duplicates within file
+      }
+      
       if (!category) errors.push('Category is required');
       if (category && !validCategories.includes(category)) {
         errors.push(`Invalid category. Must be: ${validCategories.join(', ')}`);
@@ -447,7 +460,7 @@ export const bulkUploadInventory = asyncHandler(async (req, res) => {
 
   // Insert all valid items
   if (itemsToCreate.length > 0) {
-    const createdItems = await InventoryItem.insertMany(itemsToCreate);
+    const createdItems = await InventoryItem.insertMany(itemsToCreate, { ordered: false });
 
     // Create initial stock transactions for items with stock
     for (const item of createdItems) {
@@ -465,7 +478,7 @@ export const bulkUploadInventory = asyncHandler(async (req, res) => {
             totalPrice: item.pricing.purchasePrice * item.quantity.current
           },
           reference: {
-            type: 'bulk-upload'
+            type: 'manual'  // ✅ Changed from 'bulk-upload' to 'manual'
           },
           reason: 'Initial stock from bulk upload',
           performedBy: req.user._id
@@ -475,7 +488,7 @@ export const bulkUploadInventory = asyncHandler(async (req, res) => {
 
     // Insert all transactions
     if (transactionsToCreate.length > 0) {
-      await StockTransaction.insertMany(transactionsToCreate);
+      await StockTransaction.insertMany(transactionsToCreate, { ordered: false });
     }
   }
 

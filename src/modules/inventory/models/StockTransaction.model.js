@@ -53,7 +53,7 @@ const stockTransactionSchema = new mongoose.Schema(
     reference: {
       type: {
         type: String,
-        enum: ['order', 'purchase-order', 'manual', 'system'],
+        enum: ['order', 'purchase-order', 'manual', 'system', 'bulk-upload'],
         default: 'manual',
       },
       id: {

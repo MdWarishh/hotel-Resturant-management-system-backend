@@ -1,6 +1,6 @@
 import { errorResponse } from '../../../utils/responseHandler.js';
 import { HTTP_STATUS } from '../../../config/constants.js';
-
+import { body, param, validationResult } from 'express-validator';
 /**
  * Validate Create Category Data
  */
@@ -186,3 +186,76 @@ export const validateObjectId = (req, res, next) => {
 
   next();
 };
+
+
+/**
+ * Create Sub-Category Validation
+ */
+export const validateCreateSubCategory = [
+  body('category')
+    .notEmpty()
+    .withMessage('Parent category ID is required')
+    .isMongoId()
+    .withMessage('Invalid parent category ID'),
+  body('name')
+    .trim()
+    .notEmpty()
+    .withMessage('Sub-category name is required')
+    .isLength({ min: 2, max: 50 })
+    .withMessage('Name must be between 2 and 50 characters'),
+  body('description')
+    .optional()
+    .trim()
+    .isLength({ max: 200 })
+    .withMessage('Description cannot exceed 200 characters'),
+  body('displayOrder')
+    .optional()
+    .isInt({ min: 0 })
+    .withMessage('Display order must be a non-negative integer'),
+  body('image')
+    .optional()
+    .isURL()
+    .withMessage('Image must be a valid URL'),
+  (req, res, next) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ success: false, errors: errors.array() });
+    }
+    next();
+  },
+];
+
+/**
+ * Update Sub-Category Validation
+ */
+export const validateUpdateSubCategory = [
+  body('name')
+    .optional()
+    .trim()
+    .isLength({ min: 2, max: 50 })
+    .withMessage('Name must be between 2 and 50 characters'),
+  body('description')
+    .optional()
+    .trim()
+    .isLength({ max: 200 })
+    .withMessage('Description cannot exceed 200 characters'),
+  body('displayOrder')
+    .optional()
+    .isInt({ min: 0 })
+    .withMessage('Display order must be a non-negative integer'),
+  body('image')
+    .optional()
+    .isURL()
+    .withMessage('Image must be a valid URL'),
+  body('category')
+    .optional()
+    .isMongoId()
+    .withMessage('Invalid parent category ID'),
+  (req, res, next) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ success: false, errors: errors.array() });
+    }
+    next();
+  },
+];
