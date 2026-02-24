@@ -289,7 +289,7 @@ export const checkOutGuest = asyncHandler(async (req, res) => {
 
   const booking = await Booking.findById(id)
     .populate('room')
-    .populate('hotel', 'name code');
+    .populate('hotel', 'name code address contact gstin');
 
   if (!booking) {
     throw new AppError('Booking not found', HTTP_STATUS.NOT_FOUND);
@@ -321,11 +321,12 @@ export const checkOutGuest = asyncHandler(async (req, res) => {
   booking.checkedOutBy = req.user._id;
   await booking.save();
 
-  // Update room status to cleaning
+  // Update room status to available after checkout
   const room = await Room.findById(booking.room._id);
   if (room) {
-    room.status = ROOM_STATUS.CLEANING;
+    room.status = ROOM_STATUS.AVAILABLE;
     room.currentBooking = null;
+    room.lastCleaned = new Date(); // lastCleaned timestamp bhi update karo
     await room.save();
   }
 
@@ -393,7 +394,7 @@ export const getAllBookings = asyncHandler(async (req, res) => {
 
   // Fetch bookings
   const bookings = await Booking.find(query)
-    .populate('hotel', 'name code')
+    .populate('hotel', 'name code address contact gstin')
     .populate('room', 'roomNumber roomType')
     .populate('createdBy', 'name email')
     .sort({ createdAt: -1 })
@@ -422,7 +423,7 @@ export const getBookingById = asyncHandler(async (req, res) => {
   const { id } = req.params;
 
   const booking = await Booking.findById(id)
-    .populate('hotel', 'name code address contact')
+    .populate('hotel', 'name code address contact gstin')
     .populate('room', 'roomNumber roomType floor pricing features')
     .populate('createdBy', 'name email')
     .populate('checkedInBy', 'name email')
@@ -560,228 +561,3 @@ export const updatePayment = asyncHandler(async (req, res) => {
   );
 });
 
-/**
- * Download Invoice PDF
- * 🔥 UPDATED: Shows duration based on booking type
- */
-export const downloadInvoicePDF = asyncHandler(async (req, res) => {
-  const booking = await Booking.findById(req.params.id)
-    .populate('hotel', 'name address gstin contact email')
-    .populate('room', 'roomNumber roomType')
-    .populate('createdBy', 'name')
-    .populate('checkedInBy', 'name')
-    .populate('checkedOutBy', 'name');
-
-  if (!booking) {
-    throw new AppError('Booking not found', HTTP_STATUS.NOT_FOUND);
-  }
-
-  if (booking.status !== 'checked_out') {
-    throw new AppError('Invoice available only after checkout', HTTP_STATUS.BAD_REQUEST);
-  }
-
-  const doc = new PDFDocument({
-    size: 'A4',
-    margin: 50,
-    layout: 'portrait',
-    bufferPages: true,
-  });
-
-  res.setHeader('Content-Type', 'application/pdf');
-  res.setHeader(
-    'Content-Disposition',
-    `attachment; filename=Invoice-${booking.bookingNumber}-${new Date().toISOString().split('T')[0]}.pdf`
-  );
-
-  doc.pipe(res);
-
-  // Header
-  doc
-    .fontSize(28)
-    .font('Helvetica-Bold')
-    .fillColor('#00ADB5')
-    .text(booking.hotel?.name || 'Hotel Name', { align: 'center' });
-
-  doc
-    .fontSize(11)
-    .fillColor('#333')
-    .text(
-      `${booking.hotel?.address?.street || ''}, ${booking.hotel?.address?.city || ''}, ${booking.hotel?.address?.state || ''} - ${booking.hotel?.address?.pincode || ''}`,
-      { align: 'center' }
-    );
-
-  if (booking.hotel?.gstin) {
-    doc.fontSize(10).text(`GSTIN: ${booking.hotel.gstin}`, { align: 'center' });
-  }
-
-  if (booking.hotel?.contact) {
-    doc.text(`Contact: +91 ${booking.hotel.contact} | ${booking.hotel?.email || ''}`, { align: 'center' });
-  }
-
-  doc.moveDown(2);
-
-  // Invoice Title
-  doc
-    .fontSize(22)
-    .fillColor('#333')
-    .font('Helvetica-Bold')
-    .text('TAX INVOICE', { align: 'center' });
-
-  doc.moveDown(0.5);
-
-  doc
-    .fontSize(11)
-    .text(`Invoice No: ${booking.bookingNumber}`, { continued: true })
-    .text(`          Date: ${new Date().toLocaleDateString('en-IN')}`, { align: 'right' });
-
-  doc.moveDown(1);
-
-  // Guest & Booking Info
-  const leftColumn = 50;
-  const rightColumn = 300;
-
-  doc.fontSize(12).font('Helvetica-Bold').text('Bill To:', leftColumn);
-
-  doc
-    .font('Helvetica')
-    .text(booking.guest?.name || 'Guest Name', leftColumn, doc.y + 5);
-
-  doc.text(`Phone: ${booking.guest?.phone || '—'}`, leftColumn);
-  if (booking.guest?.email) doc.text(`Email: ${booking.guest.email}`, leftColumn);
-
-  if (booking.guest?.idProof?.type && booking.guest?.idProof?.number) {
-    doc.text(
-      `ID Proof: ${booking.guest.idProof.type.toUpperCase()} - ${booking.guest.idProof.number}`,
-      leftColumn
-    );
-  }
-
-  // Right side - Booking Info
-  doc.font('Helvetica-Bold').text('Booking Details:', rightColumn);
-
-  doc
-    .font('Helvetica')
-    .text(`Room: ${booking.room?.roomNumber} (${booking.room?.roomType})`, rightColumn, doc.y + 5);
-
-  // 🔥 UPDATED: Show duration based on booking type
-  const durationText = booking.getFormattedDuration();
-  
-  if (booking.bookingType === 'hourly') {
-    doc.text(
-      `Check-in: ${new Date(booking.dates.checkIn).toLocaleString('en-IN')}`,
-      rightColumn
-    );
-    doc.text(
-      `Check-out: ${new Date(booking.dates.checkOut).toLocaleString('en-IN')}`,
-      rightColumn
-    );
-    doc.text(`Duration: ${durationText}`, rightColumn);
-  } else {
-    doc.text(
-      `Stay Period: ${new Date(booking.dates.checkIn).toLocaleDateString('en-IN')} to ${new Date(booking.dates.checkOut).toLocaleDateString('en-IN')}`,
-      rightColumn
-    );
-    doc.text(`Duration: ${durationText}`, rightColumn);
-  }
-
-  doc.text(`Status: ${booking.status.replace('_', ' ').toUpperCase()}`, rightColumn);
-
-  doc.moveDown(2);
-
-  // Charges Table
-  const tableTop = doc.y;
-  const rowHeight = 30;
-
-  // Table Header
-  doc
-    .font('Helvetica-Bold')
-    .fontSize(11)
-    .fillColor('#fff')
-    .rect(50, tableTop, 495, rowHeight)
-    .fill('#00ADB5');
-
-  doc
-    .fillColor('#fff')
-    .text('Description', 60, tableTop + 10)
-    .text('Amount (₹)', 460, tableTop + 10, { align: 'right' });
-
-  let currentY = tableTop + rowHeight;
-
-  // Room Charges
-  doc
-    .font('Helvetica')
-    .fontSize(11)
-    .fillColor('#333')
-    .text(`Room Charges (${durationText})`, 60, currentY + 10)
-    .text(`₹${booking.pricing?.roomCharges?.toLocaleString('en-IN') || '0'}`, 460, currentY + 10, { align: 'right' });
-
-  currentY += rowHeight;
-
-  // Extra Charges
-  if (booking.pricing?.extraCharges > 0) {
-    doc
-      .text('Extra Guest Charges', 60, currentY + 10)
-      .text(`₹${booking.pricing.extraCharges.toLocaleString('en-IN')}`, 460, currentY + 10, { align: 'right' });
-    currentY += rowHeight;
-  }
-
-  // GST
-  doc
-    .text('GST (5%)', 60, currentY + 10)
-    .text(`₹${booking.pricing?.tax?.toLocaleString('en-IN') || '0'}`, 460, currentY + 10, { align: 'right' });
-
-  currentY += rowHeight;
-
-  // Grand Total
-  const total = booking.pricing?.total || 0;
-  
-  doc.rect(50, currentY, 495, rowHeight).fill('#f8f9fa');
-
-  doc
-    .font('Helvetica-Bold')
-    .fontSize(12)
-    .text('GRAND TOTAL', 60, currentY + 10)
-    .text(`₹${total.toLocaleString('en-IN')}`, 460, currentY + 10, { align: 'right' });
-
-  currentY += rowHeight + 30;
-
-  // Payment Summary
-  const paid = booking.advancePayment || 0;
-  const due = Math.max(0, total - paid);
-
-  doc.font('Helvetica-Bold').fontSize(14).text('Payment Summary', 50, currentY);
-
-  currentY += 30;
-
-  doc
-    .font('Helvetica')
-    .fontSize(11)
-    .text('Amount Paid:', 60, currentY)
-    .text(`₹${paid.toLocaleString('en-IN')}`, 460, currentY, { align: 'right' });
-
-  currentY += 25;
-
-  doc
-    .text('Balance Due:', 60, currentY)
-    .text(`₹${due.toLocaleString('en-IN')}`, 460, currentY, { align: 'right' });
-
-  currentY += 40;
-
-  // Footer
-  doc
-    .fontSize(12)
-    .fillColor('#00ADB5')
-    .text('Thank you for choosing us!', 50, currentY, { align: 'center' });
-
-  doc
-    .fontSize(10)
-    .fillColor('#666')
-    .text(
-      'This is a computer-generated invoice and does not require a physical signature.',
-      50,
-      currentY + 25,
-      { align: 'center' }
-    );
-
-  doc.end();
-});

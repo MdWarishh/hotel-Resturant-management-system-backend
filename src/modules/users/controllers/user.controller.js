@@ -215,11 +215,12 @@ export const deleteUser = asyncHandler(async (req, res) => {
     throw new AppError('You cannot delete your own account', HTTP_STATUS.BAD_REQUEST);
   }
 
-  user.status = 'inactive';
-  await user.save();
+  await User.findByIdAndDelete(id);
 
-  return successResponse(res, HTTP_STATUS.OK, 'User deactivated successfully');
+  return successResponse(res, HTTP_STATUS.OK, 'User deleted successfully');
 });
+
+
 
 /**
  * Get Users by Hotel

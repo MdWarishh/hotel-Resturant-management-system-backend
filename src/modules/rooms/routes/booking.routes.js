@@ -8,7 +8,6 @@ import {
   cancelBooking,
   markNoShow,
   updatePayment,
-  downloadInvoicePDF,
 } from '../controllers/booking.controller.js';
 import { protect, authorize } from '../../../middlewares/auth.middleware.js';
 import {
@@ -81,7 +80,6 @@ router.post(
 router.post('/:id/cancel', protect, cancelBooking);
 router.post('/:id/no-show', protect, markNoShow);
 router.post('/:id/payment', protect, updatePayment);
-router.get('/:id/invoice/pdf', protect, downloadInvoicePDF);
 
 
 

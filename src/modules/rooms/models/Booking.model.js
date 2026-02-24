@@ -21,7 +21,6 @@ const bookingSchema = new mongoose.Schema(
       index: true,
     },
     
-    // 🔥 NEW: Booking Type
     bookingType: {
       type: String,
       enum: ['daily', 'hourly'],
@@ -30,14 +29,12 @@ const bookingSchema = new mongoose.Schema(
       index: true,
     },
     
-    // 🔥 NEW: Hours (for hourly bookings)
     hours: {
       type: Number,
       min: 1,
-      max: 12, // Maximum 12 hours per booking
+      max: 12,
       validate: {
         validator: function(value) {
-          // Hours required only for hourly bookings
           if (this.bookingType === 'hourly') {
             return value != null && value >= 1 && value <= 12;
           }
@@ -55,6 +52,7 @@ const bookingSchema = new mongoose.Schema(
       index: true,
     },
     
+    // 🔥 Invoice Number Field
     invoiceNumber: {
       type: String,
       unique: true,
@@ -219,14 +217,15 @@ const bookingSchema = new mongoose.Schema(
   }
 );
 
-// Indexes for common queries
+// Indexes
 bookingSchema.index({ hotel: 1, status: 1 });
 bookingSchema.index({ hotel: 1, 'dates.checkIn': 1 });
 bookingSchema.index({ hotel: 1, 'dates.checkOut': 1 });
-bookingSchema.index({ hotel: 1, room: 1, 'dates.checkIn': 1, 'dates.checkOut': 1 }); // 🔥 NEW
+bookingSchema.index({ hotel: 1, room: 1, 'dates.checkIn': 1, 'dates.checkOut': 1 });
 
-// Generate booking number
+// 🔥 UPDATED: Generate booking number AND invoice number
 bookingSchema.pre('save', async function () {
+  // Generate booking number
   if (!this.bookingNumber) {
     const date = new Date();
     const year = date.getFullYear().toString().slice(-2);
@@ -234,15 +233,46 @@ bookingSchema.pre('save', async function () {
     const random = Math.floor(Math.random() * 10000).toString().padStart(4, '0');
     this.bookingNumber = `BKG${year}${month}${random}`;
   }
+
+  // 🔥 NEW: Generate invoice number (INV-0001 format)
+  if (!this.invoiceNumber) {
+    try {
+      // Find the latest invoice number for this hotel
+      const lastBooking = await this.constructor.findOne({
+        hotel: this.hotel,
+        invoiceNumber: { $exists: true, $ne: null }
+      })
+      .sort({ createdAt: -1 })
+      .select('invoiceNumber');
+
+      let nextNumber = 1;
+
+      if (lastBooking && lastBooking.invoiceNumber) {
+        // Extract number from INV-0001 format
+        const lastNumber = parseInt(lastBooking.invoiceNumber.replace('INV-', '')) || 0;
+        nextNumber = lastNumber + 1;
+      }
+
+      // Format: INV-0001, INV-0002, etc.
+      this.invoiceNumber = `INV-${nextNumber.toString().padStart(4, '0')}`;
+      
+      console.log(`✅ Generated invoice number: ${this.invoiceNumber} for hotel: ${this.hotel}`);
+      
+    } catch (error) {
+      console.error('❌ Error generating invoice number:', error);
+      // Fallback: Use booking number-based invoice
+      const fallbackNum = parseInt(this.bookingNumber.replace(/[^0-9]/g, '')) || 1;
+      this.invoiceNumber = `INV-${fallbackNum.toString().padStart(4, '0')}`;
+    }
+  }
 });
 
-// 🔥 UPDATED: Calculate duration (nights or hours)
+// Calculate duration
 bookingSchema.methods.getDuration = function () {
   if (this.bookingType === 'hourly') {
     return this.hours;
   }
   
-  // For daily bookings, calculate nights
   const checkIn = new Date(this.dates.checkIn);
   const checkOut = new Date(this.dates.checkOut);
   const diffTime = Math.abs(checkOut - checkIn);
@@ -250,15 +280,15 @@ bookingSchema.methods.getDuration = function () {
   return diffDays;
 };
 
-// Method to calculate total nights (backward compatibility)
+// Method to calculate total nights
 bookingSchema.methods.getTotalNights = function () {
   if (this.bookingType === 'hourly') {
-    return 0; // Hourly bookings don't have nights
+    return 0;
   }
   return this.getDuration();
 };
 
-// 🔥 NEW: Get formatted duration string
+// Get formatted duration string
 bookingSchema.methods.getFormattedDuration = function () {
   if (this.bookingType === 'hourly') {
     return `${this.hours} Hour${this.hours > 1 ? 's' : ''}`;
