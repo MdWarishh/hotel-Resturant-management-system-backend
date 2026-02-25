@@ -139,7 +139,7 @@ if (orderType === 'dine-in' && tableNumber) {
     },
     { status: 'occupied' }, //
     { new: true }
-  ).populate('hotel', 'name');
+  ).populate('hotel', 'name gst');
 
   if (updatedTable) {
     // Emit the update to the /pos namespace for real-time dashboard updates
@@ -149,7 +149,7 @@ if (orderType === 'dine-in' && tableNumber) {
 }
 
   const populatedOrder = await Order.findById(order._id)
-    .populate('hotel', 'name code')
+    .populate('hotel', 'name code address contact gst')
     .populate('room', 'roomNumber')
     .populate('booking', 'bookingNumber')
     .populate('items.menuItem', 'name type preparationTime')
@@ -233,7 +233,7 @@ if (status) {
 
   // Fetch orders
   const orders = await Order.find(query)
-    .populate('hotel', 'name code')
+    .populate('hotel', 'name code address contact gst')
     .populate('room', 'roomNumber')
     .populate('booking', 'bookingNumber guest.name')
     .populate('items.menuItem', 'name')
@@ -264,7 +264,7 @@ export const getOrderById = asyncHandler(async (req, res) => {
   const { id } = req.params;
 
   const order = await Order.findById(id)
-    .populate('hotel', 'name code address contact')
+    .populate('hotel', 'name code address contact gst')
     .populate('room', 'roomNumber roomType')
     .populate('booking', 'bookingNumber guest')
     .populate('items.menuItem', 'name description type preparationTime')
@@ -339,7 +339,7 @@ export const updateOrderStatus = asyncHandler(async (req, res) => {
   await order.save();
 
   const updatedOrder = await Order.findById(id)
-    .populate('hotel', 'name code')
+    .populate('hotel', 'name code address contact gst')
     .populate('preparedBy', 'name')
     .populate('servedBy', 'name');
 
@@ -386,7 +386,7 @@ export const getKitchenOrders = asyncHandler(async (req, res) => {
 
   const orders = await Order.find(query)
     .populate('items.menuItem', 'name price variant') // Key for display
-    .populate('hotel', 'name code')
+    .populate('hotel', 'name code gst')
     .populate('room booking customer', 'name number') // If needed
     .sort({ createdAt: -1 }) // Newest first
     .limit(200); // Prevent overload; adjust as needed
@@ -541,7 +541,7 @@ export const getOrderInvoicePDF = asyncHandler(async (req, res) => {
   const { id } = req.params;
 
   const order = await Order.findById(id)
-    .populate('hotel')
+    .populate('hotel', 'name address contact gst')
     .populate('items.menuItem', 'name price');
 
   if (!order) {

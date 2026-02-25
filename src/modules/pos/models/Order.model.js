@@ -9,6 +9,12 @@ const orderSchema = new mongoose.Schema(
       unique: true,
       uppercase: true,
     },
+    invoiceNumber: {
+      type: String,
+      unique: true,
+      sparse: true,
+      uppercase: true,
+    },
     hotel: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Hotel',
@@ -213,7 +219,7 @@ orderSchema.index({ booking: 1 });
 orderSchema.index({ room: 1 });
 orderSchema.index({ hotel: 1, isPublicOrder: 1 }); 
 
-// Generate order number
+// Generate order number + invoice number
 orderSchema.pre('save', async function () {
   if (!this.orderNumber) {
     const date = new Date();
@@ -224,6 +230,28 @@ orderSchema.pre('save', async function () {
     this.orderNumber = `ORD${year}${month}${day}${random}`;
   }
 
+  if (!this.invoiceNumber) {
+    try {
+      const lastOrder = await this.constructor.findOne({
+        hotel: this.hotel,
+        invoiceNumber: { $exists: true, $ne: null }
+      })
+      .sort({ createdAt: -1 })
+      .select('invoiceNumber');
+
+      let nextNumber = 1;
+      if (lastOrder?.invoiceNumber) {
+        const lastNum = parseInt(lastOrder.invoiceNumber.replace('ORD', '')) || 0;
+        nextNumber = lastNum + 1;
+      }
+
+      this.invoiceNumber = `ORD${nextNumber.toString().padStart(3, '0')}`;
+    } catch (error) {
+      console.error('Error generating invoice number:', error);
+      const random = Math.floor(Math.random() * 1000).toString().padStart(3, '0');
+      this.invoiceNumber = `ORD${random}`;
+    }
+  }
 });
 
 // Method to check if order is active
