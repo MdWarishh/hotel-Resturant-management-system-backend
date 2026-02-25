@@ -208,7 +208,7 @@ export const createBooking = asyncHandler(async (req, res) => {
   await room.save();
 
   const populatedBooking = await Booking.findById(booking._id)
-    .populate('hotel', 'name code')
+    .populate('hotel', 'name code address contact gst')
     .populate('room', 'roomNumber roomType')
     .populate('createdBy', 'name email');
 
@@ -230,7 +230,7 @@ export const checkInGuest = asyncHandler(async (req, res) => {
 
   const booking = await Booking.findById(id)
     .populate('room')
-    .populate('hotel', 'name code');
+    .populate('hotel', 'name code address contact gst');
 
   if (!booking) {
     throw new AppError('Booking not found', HTTP_STATUS.NOT_FOUND);
@@ -267,7 +267,7 @@ export const checkInGuest = asyncHandler(async (req, res) => {
   }
 
   const updatedBooking = await Booking.findById(id)
-    .populate('hotel', 'name code')
+    .populate('hotel', 'name code address contact gst')
     .populate('room', 'roomNumber roomType')
     .populate('checkedInBy', 'name email');
 
@@ -289,7 +289,7 @@ export const checkOutGuest = asyncHandler(async (req, res) => {
 
   const booking = await Booking.findById(id)
     .populate('room')
-    .populate('hotel', 'name code address contact gstin');
+    .populate('hotel', 'name code address contact gst');
 
   if (!booking) {
     throw new AppError('Booking not found', HTTP_STATUS.NOT_FOUND);
@@ -331,7 +331,7 @@ export const checkOutGuest = asyncHandler(async (req, res) => {
   }
 
   const updatedBooking = await Booking.findById(id)
-    .populate('hotel', 'name code')
+    .populate('hotel', 'name code address contact gst')
     .populate('room', 'roomNumber roomType')
     .populate('checkedOutBy', 'name email');
 
@@ -394,7 +394,7 @@ export const getAllBookings = asyncHandler(async (req, res) => {
 
   // Fetch bookings
   const bookings = await Booking.find(query)
-    .populate('hotel', 'name code address contact gstin')
+    .populate('hotel', 'name code address contact gst')
     .populate('room', 'roomNumber roomType')
     .populate('createdBy', 'name email')
     .sort({ createdAt: -1 })
@@ -423,7 +423,7 @@ export const getBookingById = asyncHandler(async (req, res) => {
   const { id } = req.params;
 
   const booking = await Booking.findById(id)
-    .populate('hotel', 'name code address contact gstin')
+    .populate('hotel', 'name code address contact gst')
     .populate('room', 'roomNumber roomType floor pricing features')
     .populate('createdBy', 'name email')
     .populate('checkedInBy', 'name email')
@@ -560,4 +560,3 @@ export const updatePayment = asyncHandler(async (req, res) => {
     { booking }
   );
 });
-
