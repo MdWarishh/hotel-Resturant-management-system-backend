@@ -57,6 +57,7 @@ export const createOrder = asyncHandler(async (req, res) => {
   }
 
   // Process order items
+  const deliveryCharge = orderType === 'delivery' ? (req.body.deliveryCharge || 0) : 0;
   const processedItems = [];
   let subtotal = 0;
 
@@ -95,7 +96,7 @@ export const createOrder = asyncHandler(async (req, res) => {
 
   // Calculate pricing
   const tax = Math.ceil((subtotal * GST_RATE) / 100);
-  const total = Math.ceil(subtotal + tax);
+  const total = Math.ceil(subtotal + tax + deliveryCharge);
    let paymentData = { status: 'UNPAID' };
 
 if (payment && payment.mode) {
@@ -120,6 +121,7 @@ if (payment && payment.mode) {
       subtotal,
       discount: 0,
       tax,
+      deliveryCharge,
       total,
     },
     status: ORDER_STATUS.PENDING,
@@ -355,22 +357,18 @@ io.of('/pos').emit('order:updated', updatedOrder);
   );
 });
 
-/**
- * Get Kitchen Orders (for kitchen staff)
- * GET /api/pos/orders/kitchen
- * Access: Kitchen Staff, Manager
- */
+
 /**
  * Get Kitchen Orders
  * GET /api/pos/orders/kitchen
  * Access: Hotel Admin, Manager, Kitchen Staff (add role check if needed)
  */
 export const getKitchenOrders = asyncHandler(async (req, res) => {
-  const { status, all } = req.query; // Optional filters
+  const { status, all } = req.query; 
 
   // Base query: same hotel as user
   let query = { hotel: req.user.hotel._id };
-
+  
   // Status filter logic
   if (all === 'true') {
     // Show all orders (use ?all=true in frontend if needed)
@@ -680,7 +678,3 @@ export const getOrderInvoicePDF = asyncHandler(async (req, res) => {
 
   doc.end();
 });
-
-
-
-

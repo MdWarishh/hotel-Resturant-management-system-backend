@@ -95,12 +95,12 @@ const hotelSchema = new mongoose.Schema(
     settings: {
       checkInTime: {
         type: String,
-        default: '14:00', // 2:00 PM
+        default: '14:00',
         match: [/^([0-1][0-9]|2[0-3]):[0-5][0-9]$/, 'Invalid time format (HH:MM)'],
       },
       checkOutTime: {
         type: String,
-        default: '11:00', // 11:00 AM
+        default: '11:00',
         match: [/^([0-1][0-9]|2[0-3]):[0-5][0-9]$/, 'Invalid time format (HH:MM)'],
       },
       currency: {
@@ -113,9 +113,18 @@ const hotelSchema = new mongoose.Schema(
       },
       taxRate: {
         type: Number,
-        default: 5, // GST 5%
+        default: 5,
         min: 0,
         max: 100,
+      },
+      deliveryCharge: {
+        type: Number,
+        default: 0,
+        min: 0,
+      },
+      deliveryEnabled: {
+        type: Boolean,
+        default: false,
       },
     },
     status: {
