@@ -176,7 +176,7 @@ router.get(
   authorize(
     USER_ROLES.SUPER_ADMIN,
     USER_ROLES.HOTEL_ADMIN,
-    USER_ROLES.MANAGER,
+    USER_ROLES.CASHIER,
     USER_ROLES.KITCHEN_STAFF
   ),
   getKitchenOrders
@@ -239,6 +239,54 @@ router.post(
   ),
   checkoutOrder
 );
+
+// ============================================
+// KOT Route - apne posRoutes.js mein add karo
+// ============================================
+
+// GET /api/pos/orders/:id/kot
+router.get('/orders/:id/kot', protect, authorize(
+    USER_ROLES.SUPER_ADMIN,
+    USER_ROLES.HOTEL_ADMIN,
+    USER_ROLES.MANAGER,
+    USER_ROLES.CASHIER
+  ), async (req, res) => {
+  try {
+    const order = await Order.findById(req.params.id)
+      .populate('items.menuItem', 'name preparationTime category')
+      .populate('room', 'roomNumber')
+      .populate('customer', 'name phone')
+
+    if (!order) {
+      return res.status(404).json({ success: false, message: 'Order not found' })
+    }
+
+    // KOT data frontend ko bhejo — wahan print hoga
+    const kotData = {
+      kotNumber: order.orderNumber,
+      orderId: order._id,
+      orderType: order.orderType,
+      tableNumber: order.tableNumber || null,
+      roomNumber: order.room?.roomNumber || null,
+      customerName: order.customer?.name || null,
+      items: order.items.map(item => ({
+        name: item.name,
+        quantity: item.quantity,
+        variant: item.variant || null,
+        specialInstructions: item.specialInstructions || null,
+        category: item.menuItem?.category || null,
+      })),
+      specialInstructions: order.specialInstructions || order.notes || null,
+      placedAt: order.timestamps?.placed || order.createdAt,
+      printedAt: new Date(),
+    }
+
+    res.status(200).json({ success: true, data: kotData })
+  } catch (err) {
+    console.error('KOT fetch error:', err)
+    res.status(500).json({ success: false, message: 'Failed to generate KOT' })
+  }
+})
 
 router.get(
   '/reports/summary',

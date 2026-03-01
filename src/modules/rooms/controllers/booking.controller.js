@@ -58,6 +58,7 @@ export const createBooking = asyncHandler(async (req, res) => {
     hotel,
     room: roomId,
     guest,
+    additionalGuests,
     numberOfGuests,
     dates,
     specialRequests,
@@ -188,6 +189,9 @@ export const createBooking = asyncHandler(async (req, res) => {
         },
       },
     },
+    additionalGuests: Array.isArray(additionalGuests)
+  ? additionalGuests.filter(g => g?.name?.trim())  // empty names ignore
+  : [],
     numberOfGuests,
     dates: {
       checkIn,

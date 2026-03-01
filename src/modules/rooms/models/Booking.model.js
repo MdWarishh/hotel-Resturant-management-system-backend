@@ -111,6 +111,22 @@ const bookingSchema = new mongoose.Schema(
         min: 0,
       },
     },
+
+    // Additional guests (optional - name + phone)
+    additionalGuests: [
+      {
+        name: {
+          type: String,
+          trim: true,
+          required: true,
+        },
+        phone: {
+          type: String,
+          trim: true,
+          default: '',
+        },
+      },
+    ],
     
     dates: {
       checkIn: {
