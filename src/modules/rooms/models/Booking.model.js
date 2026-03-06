@@ -158,6 +158,16 @@ const bookingSchema = new mongoose.Schema(
         default: 0,
         min: 0,
       },
+       customCharges: [
+    {
+      label: { type: String, trim: true },  // "AC Charge", "Extra Bed", etc.
+      amount: { type: Number, min: 0 }
+    }
+  ],
+
+  // 🆕 YE BHI ADD KARO (daily custom price ke liye)
+ manualDailyRate: { type: Number, default: 0, min: 0 },
+manualHourlyRate: { type: Number, default: 0, min: 0 },
       discount: {
         type: Number,
         default: 0,
