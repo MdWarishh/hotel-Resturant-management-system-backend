@@ -100,6 +100,22 @@ const orderSchema = new mongoose.Schema(
         },
       },
     ],
+    // Extra charges (service charge, packaging, etc.)
+    extraCharges: [
+      {
+        label: {
+          type: String,
+          required: true,
+          trim: true,
+        },
+        amount: {
+          type: Number,
+          required: true,
+          min: 0,
+        },
+      },
+    ],
+
     pricing: {
       subtotal: {
         type: Number,
@@ -112,6 +128,11 @@ const orderSchema = new mongoose.Schema(
         min: 0,
       },
        deliveryCharge: {
+        type: Number,
+        default: 0,
+        min: 0,
+      },
+      extraChargesTotal: {
         type: Number,
         default: 0,
         min: 0,

@@ -58,16 +58,12 @@ export const createBooking = asyncHandler(async (req, res) => {
     hotel,
     room: roomId,
     guest,
-    additionalGuests,
     numberOfGuests,
     dates,
     specialRequests,
     advancePayment,
     source,
     bookingType = 'daily', // 🔥 NEW
-    manualHourlyRate,
-  manualDailyRate,    // 🆕 YE ADD KARO
-  customCharges = [], // 🆕 YE BHI ADD KARO  
     hours, // 🔥 NEW
   } = req.body;
 
@@ -128,10 +124,14 @@ export const createBooking = asyncHandler(async (req, res) => {
     // Hourly booking calculation
     duration = hours;
     
-    // 🔥 NEW: Check if manual hourly rate is provided
+    // 🔥 NEW: Check if manual/fixed price is provided
     if (req.body.manualHourlyRate && req.body.manualHourlyRate > 0) {
-      // Use custom/manual hourly rate set by admin
-      roomCharges = req.body.manualHourlyRate * hours;
+      if (req.body.isFixedPrice) {
+        // Fixed total price — hours se multiply NAHI karo
+        roomCharges = req.body.manualHourlyRate;
+      } else {
+        roomCharges = req.body.manualHourlyRate * hours;
+      }
     } else {
       // Use room's default hourly rate or auto-calculate (40% of daily rate)
       const hourlyRate = room.pricing.hourlyRate > 0 
@@ -143,11 +143,6 @@ export const createBooking = asyncHandler(async (req, res) => {
     // Daily booking calculation (unchanged)
     duration = Math.ceil((checkOut - checkIn) / (1000 * 60 * 60 * 24));
     roomCharges = room.pricing.basePrice * duration;
-     if (manualDailyRate && manualDailyRate > 0) {
-    roomCharges = manualDailyRate;
-  } else {
-    roomCharges = room.pricing.basePrice * duration;
-  }
   }
 
   // Add extra guest charges (only for daily bookings)
@@ -163,11 +158,7 @@ export const createBooking = asyncHandler(async (req, res) => {
     }
   }
 
-  const customChargesTotal = Array.isArray(customCharges)
-  ? customCharges.reduce((sum, c) => sum + (Number(c.amount) || 0), 0)
-  : 0;
-
-  const subtotal = roomCharges + extraCharges + customChargesTotal;
+  const subtotal = roomCharges + extraCharges;
   const tax = Math.ceil((subtotal * GST_RATE) / 100);
   const total = Math.ceil(subtotal + tax);
 
@@ -175,9 +166,6 @@ export const createBooking = asyncHandler(async (req, res) => {
   const pricingData = {
     roomCharges,
     extraCharges,
-     customCharges: customCharges || [],  // 🆕
-  manualDailyRate: manualDailyRate || 0, // 🆕
-  manualHourlyRate: manualHourlyRate || 0,
     discount: 0,
     subtotal,
     tax,
@@ -195,8 +183,6 @@ export const createBooking = asyncHandler(async (req, res) => {
     room: roomId,
     bookingType,
     hours: bookingType === 'hourly' ? hours : undefined,
-     manualHourlyRate,
-  manualDailyRate,    // 🆕 ADD
     guest: {
       ...guest,
       idProof: {
@@ -206,9 +192,6 @@ export const createBooking = asyncHandler(async (req, res) => {
         },
       },
     },
-    additionalGuests: Array.isArray(additionalGuests)
-  ? additionalGuests.filter(g => g?.name?.trim())  // empty names ignore
-  : [],
     numberOfGuests,
     dates: {
       checkIn,

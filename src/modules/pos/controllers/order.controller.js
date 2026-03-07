@@ -28,6 +28,7 @@ export const createOrder = asyncHandler(async (req, res) => {
     items,
     payment,
     specialInstructions,
+    extraCharges, // [{ label, amount }]
   } = req.body;
 
   // Authorization: Only allow for user's hotel
@@ -94,9 +95,15 @@ export const createOrder = asyncHandler(async (req, res) => {
     await menuItem.save();
   }
 
+  // Calculate extra charges total
+  const validExtraCharges = Array.isArray(extraCharges)
+    ? extraCharges.filter(c => c.label && Number(c.amount) > 0)
+    : [];
+  const extraChargesTotal = validExtraCharges.reduce((sum, c) => sum + Number(c.amount), 0);
+
   // Calculate pricing
-  const tax = Math.ceil((subtotal * GST_RATE) / 100);
-  const total = Math.ceil(subtotal + tax + deliveryCharge);
+  const tax = Math.ceil(((subtotal + extraChargesTotal) * GST_RATE) / 100);
+  const total = Math.ceil(subtotal + extraChargesTotal + tax + deliveryCharge);
    let paymentData = { status: 'UNPAID' };
 
 if (payment && payment.mode) {
@@ -117,11 +124,13 @@ if (payment && payment.mode) {
     booking,
     customer,
     items: processedItems,
+    extraCharges: validExtraCharges,
     pricing: {
       subtotal,
       discount: 0,
       tax,
       deliveryCharge,
+      extraChargesTotal,
       total,
     },
     status: ORDER_STATUS.PENDING,
