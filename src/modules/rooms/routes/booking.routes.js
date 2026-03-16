@@ -8,6 +8,7 @@ import {
   cancelBooking,
   markNoShow,
   updatePayment,
+  deleteBooking,
 } from '../controllers/booking.controller.js';
 import { protect, authorize } from '../../../middlewares/auth.middleware.js';
 import {
@@ -82,5 +83,17 @@ router.post('/:id/no-show', protect, markNoShow);
 router.post('/:id/payment', protect, updatePayment);
 
 
+
+// Delete booking (any status)
+router.delete(
+  '/:id',
+  validateBookingId,
+  authorize(
+    USER_ROLES.SUPER_ADMIN,
+    USER_ROLES.HOTEL_ADMIN,
+    USER_ROLES.MANAGER,
+  ),
+  deleteBooking
+);
 
 export default router;

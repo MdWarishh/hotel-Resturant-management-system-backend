@@ -120,7 +120,7 @@ export const createUser = asyncHandler(async (req, res) => {
     password,
     phone,
     role:      role || USER_ROLES.CASHIER,
-    cvUrl:     cvFile.path,
+    cvUrl:     cvFile ? cvFile.path.replace(/\\/g, '/') : null,
     status:    'active',
     createdBy: req.user._id,
   };

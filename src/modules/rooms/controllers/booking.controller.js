@@ -142,7 +142,15 @@ export const createBooking = asyncHandler(async (req, res) => {
   } else {
     // Daily booking calculation (unchanged)
     duration = Math.ceil((checkOut - checkIn) / (1000 * 60 * 60 * 24));
-    roomCharges = room.pricing.basePrice * duration;
+    if (req.body.manualDailyRate && req.body.manualDailyRate > 0) {
+      if (req.body.isFixedPrice) {
+        roomCharges = req.body.manualDailyRate;
+      } else {
+        roomCharges = req.body.manualDailyRate * duration;
+      }
+    } else {
+      roomCharges = room.pricing.basePrice * duration;
+    }
   }
 
   // Add extra guest charges (only for daily bookings)
@@ -172,9 +180,12 @@ export const createBooking = asyncHandler(async (req, res) => {
     total,
   };
 
-  // Add manual rate to pricing if it was used
+  // Store manual rates for audit trail
   if (bookingType === 'hourly' && req.body.manualHourlyRate) {
-    pricingData.manualHourlyRate = req.body.manualHourlyRate; // Store for audit
+    pricingData.manualHourlyRate = req.body.manualHourlyRate;
+  }
+  if (bookingType === 'daily' && req.body.manualDailyRate) {
+    pricingData.manualDailyRate = req.body.manualDailyRate;
   }
 
   // Create booking (update line 151 onwards)
@@ -563,4 +574,40 @@ export const updatePayment = asyncHandler(async (req, res) => {
     'Payment updated successfully',
     { booking }
   );
+});
+
+/* ---------------- DELETE BOOKING ---------------- */
+/**
+ * Delete Booking
+ * DELETE /api/bookings/:id
+ * Access: Super Admin, Hotel Admin, Manager
+ * No restriction — any status booking can be deleted
+ */
+export const deleteBooking = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+
+  const booking = await Booking.findById(id).populate('room');
+  if (!booking) {
+    throw new AppError('Booking not found', HTTP_STATUS.NOT_FOUND);
+  }
+
+  // Authorization check
+  if (req.user.role !== USER_ROLES.SUPER_ADMIN) {
+    if (!req.user.hotel || booking.hotel.toString() !== req.user.hotel._id.toString()) {
+      throw new AppError('Access denied to delete this booking', HTTP_STATUS.FORBIDDEN);
+    }
+  }
+
+  // If booking was active (confirmed/checked-in), free the room
+  const activeStatuses = [BOOKING_STATUS.CONFIRMED, BOOKING_STATUS.CHECKED_IN, BOOKING_STATUS.RESERVED];
+  if (activeStatuses.includes(booking.status)) {
+    await Room.findByIdAndUpdate(booking.room._id || booking.room, {
+      status: ROOM_STATUS.AVAILABLE,
+      currentBooking: null,
+    });
+  }
+
+  await Booking.findByIdAndDelete(id);
+
+  return successResponse(res, HTTP_STATUS.OK, 'Booking deleted successfully');
 });

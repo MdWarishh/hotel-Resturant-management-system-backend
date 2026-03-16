@@ -16,6 +16,7 @@ import {
   validateUpdateUser,
   validateUserId,
 } from '../validators/user.validator.js';
+
 import { USER_ROLES } from '../../../config/constants.js';
 
 const router = express.Router();
@@ -65,6 +66,7 @@ router.post(
   '/',
   authorize(USER_ROLES.SUPER_ADMIN, USER_ROLES.HOTEL_ADMIN),
   upload.single('cv'),
+  validateCreateUser,
   createUser
 );
 
