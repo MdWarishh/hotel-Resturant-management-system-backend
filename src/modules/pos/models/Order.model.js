@@ -1,5 +1,6 @@
 import mongoose from 'mongoose';
 import { ORDER_STATUS, PAYMENT_STATUS } from '../../../config/constants.js';
+import Counter from './Counter.model.js'; 
 
 const orderSchema = new mongoose.Schema(
   {
@@ -56,7 +57,7 @@ const orderSchema = new mongoose.Schema(
         lowercase: true,
         trim: true,
       },
-         address: { type: String, maxlength: 300 },
+      address: { type: String, maxlength: 300 },
     },
     items: [
       {
@@ -127,7 +128,7 @@ const orderSchema = new mongoose.Schema(
         default: 0,
         min: 0,
       },
-       deliveryCharge: {
+      deliveryCharge: {
         type: Number,
         default: 0,
         min: 0,
@@ -154,24 +155,24 @@ const orderSchema = new mongoose.Schema(
       default: ORDER_STATUS.PENDING,
       index: true,
     },
-payment: {
-  mode: {
-    type: String,
-    enum: ['CASH', 'UPI', 'CARD'],
-  },
-  status: {
-    type: String,
-    enum: ['PAID', 'UNPAID'],
-    default: 'UNPAID',
-  },
-  paidAt: {
-    type: Date,
-  },
-  paidBy: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'User',
-  },
-},
+    payment: {
+      mode: {
+        type: String,
+        enum: ['CASH', 'UPI', 'CARD'],
+      },
+      status: {
+        type: String,
+        enum: ['PAID', 'UNPAID'],
+        default: 'UNPAID',
+      },
+      paidAt: {
+        type: Date,
+      },
+      paidBy: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User',
+      },
+    },
     specialInstructions: {
       type: String,
       maxlength: 500,
@@ -227,10 +228,10 @@ payment: {
       default: null,
     },
     isPublicOrder: {
-  type: Boolean,
-  default: false,
-  index: true,
-},
+      type: Boolean,
+      default: false,
+      index: true,
+    },
   },
   {
     timestamps: true,
@@ -243,39 +244,35 @@ orderSchema.index({ hotel: 1, orderType: 1 });
 orderSchema.index({ hotel: 1, createdAt: -1 });
 orderSchema.index({ booking: 1 });
 orderSchema.index({ room: 1 });
-orderSchema.index({ hotel: 1, isPublicOrder: 1 }); 
+orderSchema.index({ hotel: 1, isPublicOrder: 1 });
 
-// Generate order number + invoice number
+// ✅ FIXED: Generate order number + invoice number (Race-condition safe)
 orderSchema.pre('save', async function () {
+  // --- Order Number (random + date based, collision almost impossible) ---
   if (!this.orderNumber) {
     const date = new Date();
     const year = date.getFullYear().toString().slice(-2);
     const month = (date.getMonth() + 1).toString().padStart(2, '0');
     const day = date.getDate().toString().padStart(2, '0');
-    const random = Math.floor(Math.random() * 1000).toString().padStart(3, '0');
+    const random = Math.floor(Math.random() * 9000 + 1000).toString(); // 4 digit random
     this.orderNumber = `ORD${year}${month}${day}${random}`;
   }
 
+  // --- Invoice Number (Atomic Counter — 100% race-condition safe) ---
   if (!this.invoiceNumber) {
     try {
-      const lastOrder = await this.constructor.findOne({
-        hotel: this.hotel,
-        invoiceNumber: { $exists: true, $ne: null }
-      })
-      .sort({ createdAt: -1 })
-      .select('invoiceNumber');
+      // ✅ findOneAndUpdate is atomic — no two requests can get same seq
+      const counter = await Counter.findOneAndUpdate(
+        { hotel: this.hotel, name: 'invoice' },   // filter
+        { $inc: { seq: 1 } },                      // increment atomically
+        { new: true, upsert: true }                // create if not exists
+      );
 
-      let nextNumber = 1;
-      if (lastOrder?.invoiceNumber) {
-        const lastNum = parseInt(lastOrder.invoiceNumber.replace('ORD', '')) || 0;
-        nextNumber = lastNum + 1;
-      }
-
-      this.invoiceNumber = `ORD${nextNumber.toString().padStart(3, '0')}`;
+      this.invoiceNumber = `ORD${counter.seq.toString().padStart(3, '0')}`;
     } catch (error) {
       console.error('Error generating invoice number:', error);
-      const random = Math.floor(Math.random() * 1000).toString().padStart(3, '0');
-      this.invoiceNumber = `ORD${random}`;
+      // Fallback: timestamp-based (still unique enough)
+      this.invoiceNumber = `ORD${Date.now()}`;
     }
   }
 });
@@ -288,7 +285,6 @@ orderSchema.methods.isActive = function () {
 // Method to calculate total preparation time
 orderSchema.methods.estimatedTime = function () {
   if (!this.items || this.items.length === 0) return 0;
-  // Return the maximum preparation time among all items
   return Math.max(...this.items.map((item) => item.menuItem?.preparationTime || 15));
 };
 

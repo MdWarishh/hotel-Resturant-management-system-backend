@@ -4,11 +4,11 @@ import InventoryItem from '../../inventory/models/InventoryItem.model.js';
 import StockTransaction from '../../inventory/models/StockTransaction.model.js';
 import Room from '../../rooms/models/Room.model.js';
 import Booking from '../../rooms/models/Booking.model.js';
+import Hotel from '../../hotels/models/Hotel.model.js';
 import { successResponse, paginatedResponse } from '../../../utils/responseHandler.js';
 import { HTTP_STATUS, PAGINATION, USER_ROLES, ORDER_STATUS, GST_RATE } from '../../../config/constants.js';
 import asyncHandler from '../../../utils/asyncHandler.js';
 import AppError from '../../../utils/AppError.js';
-// Add this at the top of order.controller.js
 import PDFDocument from 'pdfkit';
 import Table from '../../tables/models/Table.model.js';
 
@@ -28,7 +28,7 @@ export const createOrder = asyncHandler(async (req, res) => {
     items,
     payment,
     specialInstructions,
-    extraCharges, // [{ label, amount }]
+    extraCharges,
   } = req.body;
 
   // Authorization: Only allow for user's hotel
@@ -37,12 +37,15 @@ export const createOrder = asyncHandler(async (req, res) => {
     assignedHotel = req.user.hotel._id;
   }
 
+  // ── Fetch hotel for settings (packaging/delivery) ──
+  const hotelDoc = await Hotel.findById(assignedHotel);
+  if (!hotelDoc) throw new AppError('Hotel not found', HTTP_STATUS.NOT_FOUND);
+
   // Validate order type specific requirements
   if (orderType === 'room-service' && !room && !booking) {
     throw new AppError('Room or booking is required for room service', HTTP_STATUS.BAD_REQUEST);
   }
 
-  // Verify room/booking if provided
   if (room) {
     const roomData = await Room.findById(room);
     if (!roomData || roomData.hotel.toString() !== assignedHotel.toString()) {
@@ -57,23 +60,16 @@ export const createOrder = asyncHandler(async (req, res) => {
     }
   }
 
-  // Process order items
-  const deliveryCharge = orderType === 'delivery' ? (req.body.deliveryCharge || 0) : 0;
+  // ── Process order items ──
+  const deliveryChargeFromBody = orderType === 'delivery' ? (req.body.deliveryCharge || 0) : 0;
   const processedItems = [];
   let subtotal = 0;
 
   for (const item of items) {
     const menuItem = await MenuItem.findById(item.menuItem);
+    if (!menuItem) throw new AppError(`Menu item not found: ${item.menuItem}`, HTTP_STATUS.NOT_FOUND);
+    if (!menuItem.canOrder()) throw new AppError(`Item not available: ${menuItem.name}`, HTTP_STATUS.BAD_REQUEST);
 
-    if (!menuItem) {
-      throw new AppError(`Menu item not found: ${item.menuItem}`, HTTP_STATUS.NOT_FOUND);
-    }
-
-    if (!menuItem.canOrder()) {
-      throw new AppError(`Item not available: ${menuItem.name}`, HTTP_STATUS.BAD_REQUEST);
-    }
-
-    // Get price (consider variant if provided)
     const itemPrice = menuItem.getPrice(item.variant);
     const itemSubtotal = itemPrice * item.quantity;
 
@@ -90,32 +86,48 @@ export const createOrder = asyncHandler(async (req, res) => {
 
     subtotal += itemSubtotal;
 
-    // Update item order count
     menuItem.totalOrders += item.quantity;
     await menuItem.save();
   }
 
-  // Calculate extra charges total
+  // ── Extra charges (manual, from body) ──
   const validExtraCharges = Array.isArray(extraCharges)
-    ? extraCharges.filter(c => c.label && Number(c.amount) > 0)
+    ? extraCharges.filter((c) => c.label && Number(c.amount) > 0)
     : [];
   const extraChargesTotal = validExtraCharges.reduce((sum, c) => sum + Number(c.amount), 0);
 
-  // Calculate pricing
-  const tax = Math.ceil(((subtotal + extraChargesTotal) * GST_RATE) / 100);
-  const total = Math.ceil(subtotal + extraChargesTotal + tax + deliveryCharge);
-   let paymentData = { status: 'UNPAID' };
+  // ── Auto: Delivery charge from hotel settings ──
+  const autoDeliveryCharge =
+    orderType === 'delivery' ? hotelDoc.calcDeliveryCharge(subtotal) : 0;
 
-if (payment && payment.mode) {
-  paymentData = {
-    mode: payment.mode,        // CASH / UPI / CARD
-    status: 'PAID',
-    paidAt: new Date(),
-    paidBy: req.user._id,
-  };
-}
+  // Use hotel settings delivery charge (ignore manual deliveryCharge from body for consistency)
+  const finalDeliveryCharge = autoDeliveryCharge;
 
-  // Create order
+  // ── Auto: Packaging charge from hotel settings ──
+  const packagingCharge = hotelDoc.calcPackagingCharge(orderType, subtotal);
+
+  // Add packaging as an extraCharge line if applicable
+  if (packagingCharge > 0) {
+    validExtraCharges.push({ label: 'Packaging', amount: packagingCharge });
+  }
+
+  const finalExtraChargesTotal = validExtraCharges.reduce((sum, c) => sum + Number(c.amount), 0);
+
+  // ── Pricing ──
+  const tax = Math.ceil(((subtotal + finalExtraChargesTotal) * GST_RATE) / 100);
+  const total = Math.ceil(subtotal + finalExtraChargesTotal + tax + finalDeliveryCharge);
+
+  let paymentData = { status: 'UNPAID' };
+  if (payment && payment.mode) {
+    paymentData = {
+      mode: payment.mode,
+      status: 'PAID',
+      paidAt: new Date(),
+      paidBy: req.user._id,
+    };
+  }
+
+  // ── Create order ──
   const order = await Order.create({
     hotel: assignedHotel,
     orderType,
@@ -129,35 +141,29 @@ if (payment && payment.mode) {
       subtotal,
       discount: 0,
       tax,
-      deliveryCharge,
-      extraChargesTotal,
+      deliveryCharge: finalDeliveryCharge,
+      extraChargesTotal: finalExtraChargesTotal,
       total,
     },
     status: ORDER_STATUS.PENDING,
-
-  payment: paymentData,
+    payment: paymentData,
     specialInstructions,
     createdBy: req.user._id,
   });
 
-  // --- ADD THIS TABLE UPDATE LOGIC HERE ---
-if (orderType === 'dine-in' && tableNumber) {
-  // Update the table status to 'occupied'
-  const updatedTable = await Table.findOneAndUpdate(
-    { 
-      hotel: assignedHotel, 
-      tableNumber: tableNumber 
-    },
-    { status: 'occupied' }, //
-    { new: true }
-  ).populate('hotel', 'name gst');
+  // ── Update table status if dine-in ──
+  if (orderType === 'dine-in' && tableNumber) {
+    const updatedTable = await Table.findOneAndUpdate(
+      { hotel: assignedHotel, tableNumber },
+      { status: 'occupied' },
+      { new: true }
+    ).populate('hotel', 'name gst');
 
-  if (updatedTable) {
-    // Emit the update to the /pos namespace for real-time dashboard updates
-    const io = req.app.get('io');
-    io.of('/pos').emit('table:updated', updatedTable);
+    if (updatedTable) {
+      const io = req.app.get('io');
+      io.of('/pos').emit('table:updated', updatedTable);
+    }
   }
-}
 
   const populatedOrder = await Order.findById(order._id)
     .populate('hotel', 'name code address contact gst')
@@ -166,22 +172,17 @@ if (orderType === 'dine-in' && tableNumber) {
     .populate('items.menuItem', 'name type preparationTime')
     .populate('createdBy', 'name email');
 
-    const io = req.app.get('io');
-io.of('/pos').emit('order:created', populatedOrder);
-io.of('/pos').emit('order:updated', populatedOrder);
-io.of('/pos').emit('order:paid', populatedOrder);
-  return successResponse(
-    res,
-    HTTP_STATUS.CREATED,
-    'Order created successfully',
-    { order: populatedOrder }
-  );
+  const io = req.app.get('io');
+  io.of('/pos').emit('order:created', populatedOrder);
+  io.of('/pos').emit('order:updated', populatedOrder);
+  io.of('/pos').emit('order:paid', populatedOrder);
+
+  return successResponse(res, HTTP_STATUS.CREATED, 'Order created successfully', { order: populatedOrder });
 });
 
 /**
  * Get All Orders
  * GET /api/pos/orders
- * Access: Authenticated users
  */
 export const getAllOrders = asyncHandler(async (req, res) => {
   const {
@@ -191,21 +192,19 @@ export const getAllOrders = asyncHandler(async (req, res) => {
     status,
     orderType,
     search,
-    startDate, // ✅ Added
-    endDate,   // ✅ Added
+    startDate,
+    endDate,
   } = req.query;
 
-  // Build query
   const query = {};
 
-  // If not super admin, only show their hotel's orders
   if (req.user.role !== USER_ROLES.SUPER_ADMIN) {
     query.hotel = req.user.hotel._id;
   } else if (hotel) {
     query.hotel = hotel;
   }
 
-if (status) {
+  if (status) {
     const statusArray = status.split(',');
     query.status = { $in: statusArray };
   }
@@ -224,9 +223,7 @@ if (status) {
     }
   }
 
-  if (orderType) {
-    query.orderType = orderType;
-  }
+  if (orderType) query.orderType = orderType;
 
   if (search) {
     query.$or = [
@@ -237,12 +234,10 @@ if (status) {
     ];
   }
 
-  // Pagination
   const pageNum = parseInt(page);
   const limitNum = Math.min(parseInt(limit), PAGINATION.MAX_LIMIT);
   const skip = (pageNum - 1) * limitNum;
 
-  // Fetch orders
   const orders = await Order.find(query)
     .populate('hotel', 'name code address contact gst')
     .populate('room', 'roomNumber')
@@ -253,23 +248,14 @@ if (status) {
     .skip(skip)
     .limit(limitNum);
 
-  // Get total count
   const total = await Order.countDocuments(query);
 
-  return paginatedResponse(
-    res,
-    orders,
-    pageNum,
-    limitNum,
-    total,
-    'Orders fetched successfully'
-  );
+  return paginatedResponse(res, orders, pageNum, limitNum, total, 'Orders fetched successfully');
 });
 
 /**
  * Get Single Order
  * GET /api/pos/orders/:id
- * Access: Authenticated users
  */
 export const getOrderById = asyncHandler(async (req, res) => {
   const { id } = req.params;
@@ -283,48 +269,34 @@ export const getOrderById = asyncHandler(async (req, res) => {
     .populate('preparedBy', 'name email')
     .populate('servedBy', 'name email');
 
-  if (!order) {
-    throw new AppError('Order not found', HTTP_STATUS.NOT_FOUND);
-  }
+  if (!order) throw new AppError('Order not found', HTTP_STATUS.NOT_FOUND);
 
-  // Authorization check
   if (req.user.role !== USER_ROLES.SUPER_ADMIN) {
     if (!req.user.hotel || order.hotel._id.toString() !== req.user.hotel._id.toString()) {
       throw new AppError('Access denied to this order', HTTP_STATUS.FORBIDDEN);
     }
   }
 
-  return successResponse(
-    res,
-    HTTP_STATUS.OK,
-    'Order details fetched successfully',
-    { order }
-  );
+  return successResponse(res, HTTP_STATUS.OK, 'Order details fetched successfully', { order });
 });
 
 /**
  * Update Order Status
  * PATCH /api/pos/orders/:id/status
- * Access: Hotel Admin, Manager, Cashier, Kitchen Staff
  */
 export const updateOrderStatus = asyncHandler(async (req, res) => {
   const { id } = req.params;
   const { status } = req.body;
 
   const order = await Order.findById(id);
+  if (!order) throw new AppError('Order not found', HTTP_STATUS.NOT_FOUND);
 
-  if (!order) {
-    throw new AppError('Order not found', HTTP_STATUS.NOT_FOUND);
-  }
-
-  // Authorization check
   if (req.user.role !== USER_ROLES.SUPER_ADMIN) {
     if (!req.user.hotel || order.hotel.toString() !== req.user.hotel._id.toString()) {
       throw new AppError('Access denied to update this order', HTTP_STATUS.FORBIDDEN);
     }
   }
 
-  // Update status and timestamps
   order.status = status;
 
   switch (status) {
@@ -335,8 +307,7 @@ export const updateOrderStatus = asyncHandler(async (req, res) => {
     case ORDER_STATUS.READY:
       order.status = ORDER_STATUS.SERVED;
       order.timestamps.ready = new Date();
-  order.timestamps.served = new Date();
-
+      order.timestamps.served = new Date();
       break;
     case ORDER_STATUS.SERVED:
       order.timestamps.served = new Date();
@@ -354,55 +325,37 @@ export const updateOrderStatus = asyncHandler(async (req, res) => {
     .populate('preparedBy', 'name')
     .populate('servedBy', 'name');
 
+  const io = req.app.get('io');
+  io.of('/pos').emit('order:updated', updatedOrder);
 
-    const io = req.app.get('io');
-io.of('/pos').emit('order:updated', updatedOrder);
-
-  return successResponse(
-    res,
-    HTTP_STATUS.OK,
-    'Order status updated successfully',
-    { order: updatedOrder }
-  );
+  return successResponse(res, HTTP_STATUS.OK, 'Order status updated successfully', { order: updatedOrder });
 });
-
 
 /**
  * Get Kitchen Orders
  * GET /api/pos/orders/kitchen
- * Access: Hotel Admin, Manager, Kitchen Staff (add role check if needed)
  */
 export const getKitchenOrders = asyncHandler(async (req, res) => {
-  const { status, all } = req.query; 
-
-  // Base query: same hotel as user
+  const { status, all } = req.query;
   let query = { hotel: req.user.hotel._id };
-  
-  // Status filter logic
+
   if (all === 'true') {
-    // Show all orders (use ?all=true in frontend if needed)
-    // Optional: exclude completed/cancelled
     query.status = { $nin: ['cancelled', 'settled', 'completed'] };
   } else if (status) {
-    // ?status=pending,preparing
     query.status = { $in: status.split(',') };
   } else {
-    // Default for kitchen: show pending -> paid/served (to see full flow)
     query.status = { $in: ['pending', 'preparing', 'ready', 'served', 'paid'] };
   }
 
   const orders = await Order.find(query)
-    .populate('items.menuItem', 'name price variant') // Key for display
+    .populate('items.menuItem', 'name price variant')
     .populate('hotel', 'name code gst')
-    .populate('room booking customer', 'name number') // If needed
-    .sort({ createdAt: -1 }) // Newest first
-    .limit(200); // Prevent overload; adjust as needed
-
-  console.log(`[Kitchen] Fetched ${orders.length} orders for hotel ${req.user.hotel._id} (query: ${JSON.stringify(query)})`);
+    .populate('room booking customer', 'name number')
+    .sort({ createdAt: -1 })
+    .limit(200);
 
   successResponse(res, HTTP_STATUS.OK, 'Kitchen orders fetched', { orders });
 });
-
 
 /**
  * Checkout / Complete Order
@@ -412,12 +365,8 @@ export const checkoutOrder = asyncHandler(async (req, res) => {
   const { id } = req.params;
 
   const order = await Order.findById(id);
+  if (!order) throw new AppError('Order not found', HTTP_STATUS.NOT_FOUND);
 
-  if (!order) {
-    throw new AppError('Order not found', HTTP_STATUS.NOT_FOUND);
-  }
-
-  // 🔒 Hotel authorization
   if (
     req.user.role !== USER_ROLES.SUPER_ADMIN &&
     order.hotel.toString() !== req.user.hotel._id.toString()
@@ -425,69 +374,42 @@ export const checkoutOrder = asyncHandler(async (req, res) => {
     throw new AppError('Access denied', HTTP_STATUS.FORBIDDEN);
   }
 
-  // ✅ Only served orders can be checked out
-if (!order.payment || order.payment.status !== 'PAID') {
-  throw new AppError(
-    'Order payment is pending. Cannot checkout.',
-    HTTP_STATUS.BAD_REQUEST
-  );
-}
+  if (!order.payment || order.payment.status !== 'PAID') {
+    throw new AppError('Order payment is pending. Cannot checkout.', HTTP_STATUS.BAD_REQUEST);
+  }
 
-  // 🔥 THIS IS THE EXACT PLACE
   await deductInventoryForOrder(order, req.user);
 
-  // ✅ Mark order completed
   order.status = ORDER_STATUS.COMPLETED;
   order.timestamps.completed = new Date();
   await order.save();
 
-const io = req.app.get('io');
-io.of('/pos').emit('order:completed', order);
+  const io = req.app.get('io');
+  io.of('/pos').emit('order:completed', order);
 
-  return successResponse(
-    res,
-    HTTP_STATUS.OK,
-    'Order checked out successfully',
-    { order }
-  );
+  return successResponse(res, HTTP_STATUS.OK, 'Order checked out successfully', { order });
 });
 
-
-
-
-
-
+// ── Inventory deduction helper ──
 const deductInventoryForOrder = async (order, user) => {
   for (const orderItem of order.items) {
-    const menuItem = await MenuItem.findById(orderItem.menuItem).populate(
-      'ingredients.inventoryItem'
-    );
-
+    const menuItem = await MenuItem.findById(orderItem.menuItem).populate('ingredients.inventoryItem');
     if (!menuItem || !menuItem.ingredients) continue;
 
     for (const ingredient of menuItem.ingredients) {
       const inventoryItem = ingredient.inventoryItem;
-
       if (!inventoryItem) continue;
 
-      const requiredQty =
-        ingredient.quantity * orderItem.quantity;
+      const requiredQty = ingredient.quantity * orderItem.quantity;
 
-      // ❌ Stock check
       if (inventoryItem.quantity.current < requiredQty) {
-        throw new AppError(
-          `Insufficient stock for ${inventoryItem.name}`,
-          HTTP_STATUS.BAD_REQUEST
-        );
+        throw new AppError(`Insufficient stock for ${inventoryItem.name}`, HTTP_STATUS.BAD_REQUEST);
       }
 
       const previousStock = inventoryItem.quantity.current;
-
-      // ✅ Deduct stock
       inventoryItem.quantity.current -= requiredQty;
       await inventoryItem.save();
 
-      // ✅ Create stock transaction
       await StockTransaction.create({
         hotel: order.hotel,
         inventoryItem: inventoryItem._id,
@@ -496,10 +418,7 @@ const deductInventoryForOrder = async (order, user) => {
         unit: inventoryItem.unit,
         previousStock,
         newStock: inventoryItem.quantity.current,
-        reference: {
-          type: 'pos_order',
-          id: order._id,
-        },
+        reference: { type: 'pos_order', id: order._id },
         reason: `POS Order ${order.orderNumber}`,
         performedBy: user._id,
       });
@@ -507,14 +426,11 @@ const deductInventoryForOrder = async (order, user) => {
   }
 };
 
-
 /**
- * Get Running Orders (for cashier / billing)
+ * Get Running Orders
  * GET /api/pos/orders/running
- * Access: Hotel Admin, Manager, Cashier
  */
 export const getRunningOrders = asyncHandler(async (req, res) => {
-  // 🔒 Hotel scope
   let assignedHotel;
   if (req.user.role !== USER_ROLES.SUPER_ADMIN) {
     assignedHotel = req.user.hotel._id;
@@ -523,12 +439,7 @@ export const getRunningOrders = asyncHandler(async (req, res) => {
   const orders = await Order.find({
     hotel: assignedHotel,
     status: {
-      $in: [
-        ORDER_STATUS.PENDING,
-        ORDER_STATUS.PREPARING,
-        ORDER_STATUS.READY,
-        ORDER_STATUS.SERVED,
-      ],
+      $in: [ORDER_STATUS.PENDING, ORDER_STATUS.PREPARING, ORDER_STATUS.READY, ORDER_STATUS.SERVED],
     },
   })
     .populate('room', 'roomNumber')
@@ -536,12 +447,10 @@ export const getRunningOrders = asyncHandler(async (req, res) => {
     .populate('createdBy', 'name')
     .sort({ createdAt: -1 });
 
-  return successResponse(
-    res,
-    HTTP_STATUS.OK,
-    'Running orders fetched successfully',
-    { orders, count: orders.length }
-  );
+  return successResponse(res, HTTP_STATUS.OK, 'Running orders fetched successfully', {
+    orders,
+    count: orders.length,
+  });
 });
 
 export const getOrderInvoicePDF = asyncHandler(async (req, res) => {
@@ -551,81 +460,48 @@ export const getOrderInvoicePDF = asyncHandler(async (req, res) => {
     .populate('hotel', 'name address contact gst')
     .populate('items.menuItem', 'name price');
 
-  if (!order) {
-    throw new AppError('Order not found', HTTP_STATUS.NOT_FOUND);
-  }
+  if (!order) throw new AppError('Order not found', HTTP_STATUS.NOT_FOUND);
 
-  // Create PDF Document
-  const doc = new PDFDocument({
-    size: 'A4',
-    margin: 40,
-    layout: 'portrait',
-  });
+  const doc = new PDFDocument({ size: 'A4', margin: 40, layout: 'portrait' });
 
-  // Stream to response
   res.setHeader('Content-Type', 'application/pdf');
   res.setHeader('Content-Disposition', `inline; filename=invoice-${order.orderNumber}.pdf`);
   doc.pipe(res);
 
-  // Colors
-  const primaryColor = '#00ADB5'; // rgb(0,173,181)
+  const primaryColor = '#00ADB5';
   const accentColor = '#222831';
   const lightGray = '#EEEEEE';
   const darkGray = '#393E46';
 
-  // Header - Hotel Logo / Name
-  doc.fillColor(primaryColor).fontSize(28).font('Helvetica-Bold').text(order.hotel.name, {
-    align: 'center',
-  });
-
-  doc.fillColor(darkGray).fontSize(10).text(order.hotel.address?.street || '', {
-    align: 'center',
-  });
-  doc.text(`${order.hotel.address?.city || ''}, ${order.hotel.address?.state || ''} ${order.hotel.address?.pincode || ''}`, {
-    align: 'center',
-  });
+  doc.fillColor(primaryColor).fontSize(28).font('Helvetica-Bold').text(order.hotel.name, { align: 'center' });
+  doc.fillColor(darkGray).fontSize(10).text(order.hotel.address?.street || '', { align: 'center' });
+  doc.text(`${order.hotel.address?.city || ''}, ${order.hotel.address?.state || ''} ${order.hotel.address?.pincode || ''}`, { align: 'center' });
   doc.moveDown(0.5);
-
-  doc.fillColor(darkGray).fontSize(9).text(`Phone: ${order.hotel.contact?.phone || 'N/A'} | Email: ${order.hotel.contact?.email || 'N/A'}`, {
-    align: 'center',
-  });
-
+  doc.fillColor(darkGray).fontSize(9).text(`Phone: ${order.hotel.contact?.phone || 'N/A'} | Email: ${order.hotel.contact?.email || 'N/A'}`, { align: 'center' });
   doc.moveDown(1);
 
-  // Invoice Title & Info
   doc.fillColor(accentColor).fontSize(18).text('INVOICE', { align: 'center' });
   doc.moveDown(0.5);
-
   doc.fontSize(11).fillColor(darkGray);
   doc.text(`Invoice No: ${order.orderNumber}`, 50, doc.y);
   doc.text(`Date: ${new Date(order.createdAt).toLocaleDateString('en-IN')}`, 50, doc.y);
   doc.text(`Order Type: ${order.orderType.toUpperCase()}`, 50, doc.y);
-
-  if (order.tableNumber) {
-    doc.text(`Table: ${order.tableNumber}`, 50, doc.y);
-  }
-  if (order.room?.roomNumber) {
-    doc.text(`Room: ${order.room.roomNumber}`, 50, doc.y);
-  }
-
+  if (order.tableNumber) doc.text(`Table: ${order.tableNumber}`, 50, doc.y);
+  if (order.room?.roomNumber) doc.text(`Room: ${order.room.roomNumber}`, 50, doc.y);
   doc.moveDown(1);
 
-  // Bill To Section
   doc.fillColor(primaryColor).fontSize(12).text('Bill To:', 50, doc.y);
   doc.fillColor(darkGray).fontSize(11);
   doc.text(`Name: ${order.customer?.name || 'Guest'}`, 50, doc.y);
   if (order.customer?.phone) doc.text(`Phone: ${order.customer.phone}`, 50, doc.y);
   if (order.customer?.email) doc.text(`Email: ${order.customer.email}`, 50, doc.y);
-
   doc.moveDown(1.5);
 
-  // Items Table
   const tableTop = doc.y;
   const tableHeaders = ['Item', 'Qty', 'Price', 'Amount'];
   const colWidths = [240, 60, 80, 100];
   let x = 50;
 
-  // Table Header
   doc.fillColor(lightGray).rect(40, tableTop - 10, 510, 30).fill();
   doc.fillColor(accentColor).font('Helvetica-Bold').fontSize(11);
   tableHeaders.forEach((header, i) => {
@@ -633,35 +509,28 @@ export const getOrderInvoicePDF = asyncHandler(async (req, res) => {
     x += colWidths[i];
   });
 
-  // Items Rows
   doc.font('Helvetica').fontSize(10).fillColor(darkGray);
   let currentY = tableTop + 30;
 
   order.items.forEach((item) => {
     const itemName = item.menuItem?.name || 'Unknown Item';
-    const qty = item.quantity;
-    const price = item.price;
-    const total = qty * price;
-
     x = 50;
     doc.text(itemName, x, currentY, { width: colWidths[0], align: 'left', lineBreak: true });
     x += colWidths[0];
-    doc.text(qty.toString(), x, currentY, { width: colWidths[1], align: 'center' });
+    doc.text(item.quantity.toString(), x, currentY, { width: colWidths[1], align: 'center' });
     x += colWidths[1];
-    doc.text(`₹${price.toFixed(2)}`, x, currentY, { width: colWidths[2], align: 'right' });
+    doc.text(`₹${item.price.toFixed(2)}`, x, currentY, { width: colWidths[2], align: 'right' });
     x += colWidths[2];
-    doc.text(`₹${total.toFixed(2)}`, x, currentY, { width: colWidths[3], align: 'right' });
-
+    doc.text(`₹${(item.quantity * item.price).toFixed(2)}`, x, currentY, { width: colWidths[3], align: 'right' });
     currentY += 25;
   });
 
-  // Totals Section
   doc.moveDown(1);
   doc.fillColor(primaryColor).font('Helvetica-Bold').fontSize(12).text('Summary', 400, doc.y);
   doc.moveDown(0.5);
 
-  doc.font('Helvetica').fontSize(11).fillColor(darkGray);
   const totalsX = 350;
+  doc.font('Helvetica').fontSize(11).fillColor(darkGray);
   doc.text('Subtotal:', totalsX, doc.y);
   doc.text(`₹${order.pricing.subtotal.toFixed(2)}`, 450, doc.y, { align: 'right' });
   doc.moveDown(0.5);
@@ -669,6 +538,21 @@ export const getOrderInvoicePDF = asyncHandler(async (req, res) => {
   if (order.pricing.discount > 0) {
     doc.text('Discount:', totalsX, doc.y);
     doc.text(`-₹${order.pricing.discount.toFixed(2)}`, 450, doc.y, { align: 'right' });
+    doc.moveDown(0.5);
+  }
+
+  // ✅ Show packaging charge in PDF if present
+  if (order.pricing.extraChargesTotal > 0) {
+    order.extraCharges?.forEach((ec) => {
+      doc.text(`${ec.label}:`, totalsX, doc.y);
+      doc.text(`₹${ec.amount.toFixed(2)}`, 450, doc.y, { align: 'right' });
+      doc.moveDown(0.5);
+    });
+  }
+
+  if (order.pricing.deliveryCharge > 0) {
+    doc.text('Delivery Charge:', totalsX, doc.y);
+    doc.text(`₹${order.pricing.deliveryCharge.toFixed(2)}`, 450, doc.y, { align: 'right' });
     doc.moveDown(0.5);
   }
 
@@ -680,7 +564,6 @@ export const getOrderInvoicePDF = asyncHandler(async (req, res) => {
   doc.text('Grand Total:', totalsX, doc.y);
   doc.text(`₹${order.pricing.total.toFixed(2)}`, 450, doc.y, { align: 'right' });
 
-  // Footer
   doc.moveDown(2);
   doc.fontSize(10).fillColor(darkGray).text('Thank you for dining with us!', 50, doc.y, { align: 'center' });
   doc.text(`Payment Mode: ${order.payment?.mode || 'N/A'} • Status: ${order.payment?.status || 'Pending'}`, 50, doc.y + 15, { align: 'center' });

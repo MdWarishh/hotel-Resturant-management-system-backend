@@ -1,5 +1,6 @@
 import mongoose from 'mongoose';
 import { BOOKING_STATUS, PAYMENT_STATUS } from '../../../config/constants.js';
+import Counter from '../../pos/models/Counter.model.js'; 
 
 const bookingSchema = new mongoose.Schema(
   {
@@ -20,7 +21,7 @@ const bookingSchema = new mongoose.Schema(
       required: true,
       index: true,
     },
-    
+
     bookingType: {
       type: String,
       enum: ['daily', 'hourly'],
@@ -28,22 +29,12 @@ const bookingSchema = new mongoose.Schema(
       required: true,
       index: true,
     },
-    
+
     hours: {
       type: Number,
       min: 1,
-      max: 12,
-      validate: {
-        validator: function(value) {
-          if (this.bookingType === 'hourly') {
-            return value != null && value >= 1 && value <= 12;
-          }
-          return true;
-        },
-        message: 'Hours must be between 1 and 12 for hourly bookings'
-      }
     },
-    
+
     source: {
       type: String,
       enum: ['Direct', 'OYO', 'MakeMyTrip', 'Booking.com', 'Goibibo', 'Airbnb', 'Agoda', 'Other'],
@@ -51,15 +42,15 @@ const bookingSchema = new mongoose.Schema(
       required: true,
       index: true,
     },
-    
-    // 🔥 Invoice Number Field
+
+    // ✅ Invoice Number — atomic counter based
     invoiceNumber: {
       type: String,
       unique: true,
       sparse: true,
       uppercase: true,
     },
-    
+
     guest: {
       name: {
         type: String,
@@ -70,20 +61,18 @@ const bookingSchema = new mongoose.Schema(
         type: String,
         lowercase: true,
         trim: true,
-        match: [
-          /^\w+([\.-]?\w+)*@\w+([\.-]?\w+)*(\.\w{2,3})+$/,
-          'Please enter a valid email',
-        ],
+        // ✅ No strict email regex — accept as-is
       },
       phone: {
         type: String,
         required: [true, 'Guest phone is required'],
-        match: [/^[0-9]{10}$/, 'Please enter a valid 10-digit phone number'],
+        trim: true,
+        // ✅ No strict 10-digit validation — accept any format
       },
       idProof: {
         type: {
           type: String,
-          enum: ['aadhar', 'passport', 'driving_license', 'voter_id'],
+          enum: ['aadhar', 'pan', 'passport', 'driving-license', 'driving_license', 'voter-id', 'voter_id'],
         },
         number: String,
         image: {
@@ -98,7 +87,7 @@ const bookingSchema = new mongoose.Schema(
         pincode: String,
       },
     },
-    
+
     numberOfGuests: {
       adults: {
         type: Number,
@@ -112,7 +101,6 @@ const bookingSchema = new mongoose.Schema(
       },
     },
 
-    // Additional guests (optional - name + phone)
     additionalGuests: [
       {
         name: {
@@ -127,7 +115,7 @@ const bookingSchema = new mongoose.Schema(
         },
       },
     ],
-    
+
     dates: {
       checkIn: {
         type: Date,
@@ -146,7 +134,7 @@ const bookingSchema = new mongoose.Schema(
         default: null,
       },
     },
-    
+
     pricing: {
       roomCharges: {
         type: Number,
@@ -158,80 +146,79 @@ const bookingSchema = new mongoose.Schema(
         default: 0,
         min: 0,
       },
-       customCharges: [
-    {
-      label: { type: String, trim: true },  // "AC Charge", "Extra Bed", etc.
-      amount: { type: Number, min: 0 }
-    }
-  ],
-
-  // 🆕 YE BHI ADD KARO (daily custom price ke liye)
- manualDailyRate: { type: Number, default: 0, min: 0 },
-manualHourlyRate: { type: Number, default: 0, min: 0 },
+      customCharges: [
+        {
+          label: { type: String, trim: true },
+          amount: { type: Number, min: 0 },
+        },
+      ],
+      manualDailyRate: { type: Number, default: 0, min: 0 },
+      manualHourlyRate: { type: Number, default: 0, min: 0 },
       discount: {
         type: Number,
         default: 0,
         min: 0,
       },
-      subtotal: {
-        type: Number,
-      },
+      subtotal: { type: Number },
       taxableAmount: { type: Number, min: 0 },
       cgstAmount: { type: Number, default: 0, min: 0 },
       sgstAmount: { type: Number, default: 0, min: 0 },
       igstAmount: { type: Number, default: 0, min: 0 },
       gstRate: { type: Number, min: 0 },
-      tax: {
-        type: Number,
-      },
-      total: {
-        type: Number,
-      },
+      tax: { type: Number },
+      total: { type: Number },
     },
-    
+
     status: {
       type: String,
       enum: Object.values(BOOKING_STATUS),
       default: BOOKING_STATUS.PENDING,
       index: true,
     },
-    
+
     paymentStatus: {
       type: String,
       enum: Object.values(PAYMENT_STATUS),
       default: PAYMENT_STATUS.PENDING,
       index: true,
     },
-    
+
+    // ✅ Payment Method — cash / upi / card
+    paymentMethod: {
+      type: String,
+      enum: ['cash', 'upi', 'card'],
+      default: null,
+    },
+
     advancePayment: {
       type: Number,
       default: 0,
       min: 0,
     },
-    
+
     specialRequests: {
       type: String,
       maxlength: 500,
       default: '',
     },
-    
+
     notes: {
       type: String,
       maxlength: 500,
       default: '',
     },
-    
+
     createdBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',
     },
-    
+
     checkedInBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',
       default: null,
     },
-    
+
     checkedOutBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',
@@ -249,46 +236,29 @@ bookingSchema.index({ hotel: 1, 'dates.checkIn': 1 });
 bookingSchema.index({ hotel: 1, 'dates.checkOut': 1 });
 bookingSchema.index({ hotel: 1, room: 1, 'dates.checkIn': 1, 'dates.checkOut': 1 });
 
-// 🔥 UPDATED: Generate booking number AND invoice number
+// ✅ Pre-save: Booking number + Atomic invoice number
 bookingSchema.pre('save', async function () {
-  // Generate booking number
+  // Booking number — date + random
   if (!this.bookingNumber) {
     const date = new Date();
     const year = date.getFullYear().toString().slice(-2);
     const month = (date.getMonth() + 1).toString().padStart(2, '0');
-    const random = Math.floor(Math.random() * 10000).toString().padStart(4, '0');
+    const random = Math.floor(Math.random() * 9000 + 1000).toString();
     this.bookingNumber = `BKG${year}${month}${random}`;
   }
 
-  // 🔥 NEW: Generate invoice number (INV-0001 format)
+  // ✅ Invoice number — atomic counter, race-condition safe
   if (!this.invoiceNumber) {
     try {
-      // Find the latest invoice number for this hotel
-      const lastBooking = await this.constructor.findOne({
-        hotel: this.hotel,
-        invoiceNumber: { $exists: true, $ne: null }
-      })
-      .sort({ createdAt: -1 })
-      .select('invoiceNumber');
-
-      let nextNumber = 1;
-
-      if (lastBooking && lastBooking.invoiceNumber) {
-        // Extract number from INV-0001 format
-        const lastNumber = parseInt(lastBooking.invoiceNumber.replace('INV-', '')) || 0;
-        nextNumber = lastNumber + 1;
-      }
-
-      // Format: INV-0001, INV-0002, etc.
-      this.invoiceNumber = `INV-${nextNumber.toString().padStart(4, '0')}`;
-      
-      console.log(`✅ Generated invoice number: ${this.invoiceNumber} for hotel: ${this.hotel}`);
-      
+      const counter = await Counter.findOneAndUpdate(
+        { hotel: this.hotel, name: 'booking-invoice' },
+        { $inc: { seq: 1 } },
+        { new: true, upsert: true }
+      );
+      this.invoiceNumber = `INV-${counter.seq.toString().padStart(4, '0')}`;
     } catch (error) {
-      console.error('❌ Error generating invoice number:', error);
-      // Fallback: Use booking number-based invoice
-      const fallbackNum = parseInt(this.bookingNumber.replace(/[^0-9]/g, '')) || 1;
-      this.invoiceNumber = `INV-${fallbackNum.toString().padStart(4, '0')}`;
+      console.error('Error generating booking invoice number:', error);
+      this.invoiceNumber = `INV-${Date.now()}`;
     }
   }
 });
@@ -298,23 +268,17 @@ bookingSchema.methods.getDuration = function () {
   if (this.bookingType === 'hourly') {
     return this.hours;
   }
-  
   const checkIn = new Date(this.dates.checkIn);
   const checkOut = new Date(this.dates.checkOut);
   const diffTime = Math.abs(checkOut - checkIn);
-  const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-  return diffDays;
+  return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
 };
 
-// Method to calculate total nights
 bookingSchema.methods.getTotalNights = function () {
-  if (this.bookingType === 'hourly') {
-    return 0;
-  }
+  if (this.bookingType === 'hourly') return 0;
   return this.getDuration();
 };
 
-// Get formatted duration string
 bookingSchema.methods.getFormattedDuration = function () {
   if (this.bookingType === 'hourly') {
     return `${this.hours} Hour${this.hours > 1 ? 's' : ''}`;
@@ -323,7 +287,6 @@ bookingSchema.methods.getFormattedDuration = function () {
   return `${nights} Night${nights > 1 ? 's' : ''}`;
 };
 
-// Method to check if booking is active
 bookingSchema.methods.isActive = function () {
   return [BOOKING_STATUS.CONFIRMED, BOOKING_STATUS.CHECKED_IN].includes(this.status);
 };
