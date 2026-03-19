@@ -1,6 +1,7 @@
 // backend/src/modules/pos/controllers/qrAndFeedback.controller.js
 
 import QRCode from 'qrcode';
+import mongoose from 'mongoose';
 import Hotel from '../../hotels/models/Hotel.model.js';
 import MenuItem from '../models/MenuItem.model.js';
 import Feedback from '../models/Feedback.model.js';
@@ -234,5 +235,66 @@ export const getFeedbackSummary = asyncHandler(async (req, res) => {
       },
       recentFeedbacks,
     }
+  );
+});
+/**
+ * ⭐ GET BULK FEEDBACK STATS (Public)
+ * GET /api/allinone/:hotelCode/feedback/bulk?itemIds=id1,id2,id3
+ */
+export const getBulkFeedbackStats = asyncHandler(async (req, res) => {
+  const { hotelCode } = req.params;
+  const { itemIds } = req.query;
+
+  if (!itemIds) {
+    throw new AppError('itemIds query param required', HTTP_STATUS.BAD_REQUEST);
+  }
+
+  // Validate hotel
+  const hotel = await Hotel.findOne({ code: hotelCode.toUpperCase() });
+  if (!hotel) {
+    throw new AppError('Hotel not found', HTTP_STATUS.NOT_FOUND);
+  }
+
+  const itemIdArray = itemIds.split(',').filter(Boolean);
+
+  // Single aggregation — all items in one query
+  const ratingsData = await Feedback.aggregate([
+    {
+      $match: {
+        hotel: hotel._id,
+        menuItem: { $in: itemIdArray.map(id => new mongoose.Types.ObjectId(id)) },
+        isApproved: true,
+      },
+    },
+    {
+      $group: {
+        _id: '$menuItem',
+        averageRating: { $avg: '$rating' },
+        totalReviews: { $sum: 1 },
+      },
+    },
+  ]);
+
+  // Build a map: { itemId: { averageRating, totalReviews } }
+  const statsMap = {};
+
+  // Initialize all items with 0
+  itemIdArray.forEach(id => {
+    statsMap[id] = { averageRating: 0, totalReviews: 0 };
+  });
+
+  // Fill in actual data
+  ratingsData.forEach(item => {
+    statsMap[item._id.toString()] = {
+      averageRating: Math.round(item.averageRating * 10) / 10,
+      totalReviews: item.totalReviews,
+    };
+  });
+
+  return successResponse(
+    res,
+    HTTP_STATUS.OK,
+    'Bulk feedback stats fetched successfully',
+    { stats: statsMap }
   );
 });

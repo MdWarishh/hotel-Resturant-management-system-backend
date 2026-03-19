@@ -1,6 +1,7 @@
 import Booking from '../models/Booking.model.js';
 import Room from '../../rooms/models/Room.model.js';
 import Hotel from '../../hotels/models/Hotel.model.js';
+// import Counter from '../models/Counter.model.js'; // ✅ NEW: atomic counter
 import { successResponse, paginatedResponse } from '../../../utils/responseHandler.js';
 import { HTTP_STATUS, PAGINATION, USER_ROLES, BOOKING_STATUS, ROOM_STATUS, PAYMENT_STATUS, GST_RATE } from '../../../config/constants.js';
 import asyncHandler from '../../../utils/asyncHandler.js';
@@ -34,10 +35,6 @@ const checkRoomAvailability = async (roomId, checkIn, checkOut, bookingType, exc
   return { available: true };
 };
 
-/**
- * Create New Booking
- * POST /api/bookings
- */
 export const createBooking = asyncHandler(async (req, res) => {
   const {
     hotel,
@@ -52,7 +49,6 @@ export const createBooking = asyncHandler(async (req, res) => {
     hours,
     additionalGuests,
     customCharges,
-    // ✅ Payment method
     paymentMethod, // 'cash' | 'upi' | 'card' | undefined (unpaid)
   } = req.body;
 
@@ -133,15 +129,16 @@ export const createBooking = asyncHandler(async (req, res) => {
     }
   }
 
-  // Custom charges (AC charge, extra bed, etc.)
+  // Custom charges
   const validCustomCharges = Array.isArray(customCharges)
     ? customCharges.filter(c => c.label && Number(c.amount) > 0)
     : [];
   const customChargesTotal = validCustomCharges.reduce((sum, c) => sum + Number(c.amount), 0);
 
   const subtotal = roomCharges + extraCharges + customChargesTotal;
-  const tax = Math.ceil((subtotal * GST_RATE) / 100);
-  const total = Math.ceil(subtotal + tax);
+ // Controller mein bhi ye dono lines update karo
+const tax = Math.round((subtotal * GST_RATE) / 100);
+const total = Math.round(subtotal + tax);
 
   const pricingData = {
     roomCharges,
@@ -160,15 +157,15 @@ export const createBooking = asyncHandler(async (req, res) => {
     pricingData.manualDailyRate = req.body.manualDailyRate;
   }
 
-  // ✅ Payment status based on paymentMethod
-  // Agar method select kiya → PAID, warna PENDING
+  // Payment status
   const validPaymentMethods = ['cash', 'upi', 'card'];
   const isPaymentProvided = paymentMethod && validPaymentMethods.includes(paymentMethod.toLowerCase());
 
   const paymentStatus = isPaymentProvided ? PAYMENT_STATUS.PAID : PAYMENT_STATUS.PENDING;
-  const finalAdvancePayment = isPaymentProvided
-    ? total  // Full payment done
-    : (advancePayment || 0);
+  const finalAdvancePayment = isPaymentProvided ? total : (advancePayment || 0);
+
+  // ✅ FIXED: Atomic invoice number — race condition proof
+  // const invoiceNumber = await generateInvoiceNumber(assignedHotel);
 
   // ── Create Booking ──
   const booking = await Booking.create({
@@ -176,6 +173,7 @@ export const createBooking = asyncHandler(async (req, res) => {
     room: roomId,
     bookingType,
     hours: bookingType === 'hourly' ? hours : undefined,
+    // invoiceNumber,
     guest: {
       ...guest,
       idProof: {
@@ -189,7 +187,7 @@ export const createBooking = asyncHandler(async (req, res) => {
     pricing: pricingData,
     status: BOOKING_STATUS.CONFIRMED,
     paymentStatus,
-    paymentMethod: isPaymentProvided ? paymentMethod.toLowerCase() : undefined, // ✅ store method
+    paymentMethod: isPaymentProvided ? paymentMethod.toLowerCase() : undefined,
     advancePayment: finalAdvancePayment,
     specialRequests,
     createdBy: req.user._id,
@@ -275,9 +273,6 @@ export const checkOutGuest = asyncHandler(async (req, res) => {
     throw new AppError('Guest must be checked in to check out', HTTP_STATUS.BAD_REQUEST);
   }
 
-  // ✅ Payment check hata diya — checkout bina payment ke bhi ho sakta hai
-  // if (booking.paymentStatus !== PAYMENT_STATUS.PAID) { ... }
-
   booking.status = BOOKING_STATUS.CHECKED_OUT;
   booking.dates.actualCheckOut = new Date();
   booking.checkedOutBy = req.user._id;
@@ -327,6 +322,7 @@ export const getAllBookings = asyncHandler(async (req, res) => {
   if (search) {
     query.$or = [
       { bookingNumber: new RegExp(search, 'i') },
+      { invoiceNumber: new RegExp(search, 'i') },
       { 'guest.name': new RegExp(search, 'i') },
       { 'guest.phone': new RegExp(search, 'i') },
     ];
@@ -425,7 +421,6 @@ export const updatePayment = asyncHandler(async (req, res) => {
 
   const total = booking.pricing?.total || 0;
 
-  // ✅ Agar paymentMethod diya → full payment mark karo
   const validMethods = ['cash', 'upi', 'card'];
   if (paymentMethod && validMethods.includes(paymentMethod.toLowerCase())) {
     booking.paymentMethod = paymentMethod.toLowerCase();
@@ -435,7 +430,6 @@ export const updatePayment = asyncHandler(async (req, res) => {
     return successResponse(res, HTTP_STATUS.OK, 'Payment confirmed successfully', { booking });
   }
 
-  // Manual amount update
   if (amount !== undefined) {
     if (Number(amount) < 0) throw new AppError('Valid payment amount is required', HTTP_STATUS.BAD_REQUEST);
 

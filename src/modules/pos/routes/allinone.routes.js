@@ -22,6 +22,7 @@ import {
 import {
   submitFeedback,
   getItemFeedback,
+  getBulkFeedbackStats,
 } from '../controllers/qrAndFeedback.controller.js';
 
 const router = express.Router();
@@ -152,6 +153,12 @@ router.get('/:hotelCode/order/:orderNumber', trackPublicOrder);
  * }
  */
 router.post('/:hotelCode/feedback', submitFeedback);
+
+/**
+ * Get bulk feedback stats for multiple items (no authentication)
+ * GET /api/allinone/:hotelCode/feedback/bulk?itemIds=id1,id2,id3
+ */
+router.get('/:hotelCode/feedback/bulk', getBulkFeedbackStats);
 
 /**
  * Get feedback for a specific item (no authentication)

@@ -18,24 +18,62 @@ import AppError from '../../../utils/AppError.js';
 export const getAllPublicHotels = asyncHandler(async (req, res) => {
   const { city, search } = req.query;
 
-  // Build query
-  const query = { status: 'active' };
+  const matchQuery = { status: 'active' };
 
   if (city) {
-    query['address.city'] = new RegExp(city, 'i');
+    matchQuery['address.city'] = new RegExp(city, 'i');
   }
 
   if (search) {
-    query.$or = [
+    matchQuery.$or = [
       { name: new RegExp(search, 'i') },
       { code: new RegExp(search, 'i') },
       { description: new RegExp(search, 'i') },
     ];
   }
 
-  const hotels = await Hotel.find(query)
-    .select('name code description address contact logo images amenities totalMenuCategories totalMenuItems')
-    .sort({ name: 1 });
+  const hotels = await Hotel.aggregate([
+    { $match: matchQuery },
+    { $sort: { name: 1 } },
+    {
+      $lookup: {
+        from: 'menucategories',
+        localField: '_id',
+        foreignField: 'hotel',
+        as: 'menuCategories',
+        pipeline: [{ $match: { isActive: true } }],
+      },
+    },
+    {
+      $lookup: {
+        from: 'menuitems',
+        localField: '_id',
+        foreignField: 'hotel',
+        as: 'menuItems',
+        pipeline: [{ $match: { isActive: true, isAvailable: true } }],
+      },
+    },
+    {
+      $addFields: {
+        totalMenuCategories: { $size: '$menuCategories' },
+        totalMenuItems: { $size: '$menuItems' },
+      },
+    },
+    {
+      $project: {
+        name: 1,
+        code: 1,
+        description: 1,
+        address: 1,
+        contact: 1,
+        logo: 1,
+        images: 1,
+        amenities: 1,
+        totalMenuCategories: 1,
+        totalMenuItems: 1,
+      },
+    },
+  ]);
 
   return successResponse(
     res,
