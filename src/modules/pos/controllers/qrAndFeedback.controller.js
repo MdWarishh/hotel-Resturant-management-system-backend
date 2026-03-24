@@ -85,11 +85,6 @@ export const submitFeedback = asyncHandler(async (req, res) => {
     throw new AppError('Rating must be between 1 and 5', HTTP_STATUS.BAD_REQUEST);
   }
 
-  // Validate customer info
-  if (!customer || !customer.name || !customer.phone) {
-    throw new AppError('Customer name and phone are required', HTTP_STATUS.BAD_REQUEST);
-  }
-
   // Find order (optional)
   let order = null;
   if (orderNumber) {
@@ -105,8 +100,7 @@ export const submitFeedback = asyncHandler(async (req, res) => {
     menuItem: menuItem._id,
     order: order?._id || null,
     customer: {
-      name: customer.name.trim(),
-      phone: customer.phone,
+      name: customer?.name?.trim() || 'Anonymous',
     },
     rating,
     comment: comment?.trim() || '',

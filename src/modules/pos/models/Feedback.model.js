@@ -24,12 +24,12 @@ const feedbackSchema = new mongoose.Schema(
     customer: {
       name: {
         type: String,
-        required: true,
+        required: false,
         trim: true,
       },
       phone: {
         type: String,
-        required: true,
+        required: false,
       },
     },
     rating: {
