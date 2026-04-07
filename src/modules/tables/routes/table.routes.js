@@ -41,14 +41,14 @@ router.get('/:id', getTables);
  */
 router.put(
   '/:id',
-  authorize(USER_ROLES.SUPER_ADMIN, USER_ROLES.HOTEL_ADMIN),
+  authorize(USER_ROLES.SUPER_ADMIN, USER_ROLES.HOTEL_ADMIN, USER_ROLES.CASHIER),
   validateUpdateTable,
   updateTable
 );
 
 router.patch(
   '/:id',
-  authorize(USER_ROLES.SUPER_ADMIN, USER_ROLES.HOTEL_ADMIN),
+  authorize(USER_ROLES.SUPER_ADMIN, USER_ROLES.HOTEL_ADMIN, USER_ROLES.CASHIER),
   validateUpdateTable,
   updateTable
 );
@@ -58,7 +58,7 @@ router.patch(
  */
 router.patch(
   '/:id/status',
-  authorize(USER_ROLES.SUPER_ADMIN, USER_ROLES.HOTEL_ADMIN),
+  authorize(USER_ROLES.SUPER_ADMIN, USER_ROLES.HOTEL_ADMIN, USER_ROLES.CASHIER),
   updateTableStatus
 );
 
@@ -67,7 +67,7 @@ router.patch(
  */
 router.delete(
   '/:id',
-  authorize(USER_ROLES.SUPER_ADMIN, USER_ROLES.HOTEL_ADMIN),
+  authorize(USER_ROLES.SUPER_ADMIN, USER_ROLES.HOTEL_ADMIN, USER_ROLES.CASHIER),
   deleteTable // This controller function needs to be created
 );
 

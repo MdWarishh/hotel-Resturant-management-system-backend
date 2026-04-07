@@ -1,14 +1,17 @@
+import dotenv from 'dotenv';
+dotenv.config();
+
 import { createServer } from 'http';
 import { Server } from 'socket.io';
 import { verifyToken } from './src/utils/jwt.js';
-import dotenv from 'dotenv';
 import express from 'express';
 import mongoose from 'mongoose';
 import cors from 'cors';
 import connectDB from './src/config/database.js';
+import { initPush } from './src/services/push.service.js';
 
-dotenv.config();
 
+initPush();
 const app = express();
 
 // ============================================
@@ -80,6 +83,7 @@ import tableRoutes from './src/modules/tables/routes/table.routes.js';
 import superAdminRoutes from './src/modules/super-admin/routes/superadmin.routes.js';
 import allinoneRoutes from './src/modules/pos/routes/allinone.routes.js';
 import gstReportsRoutes from './src/modules/reports/routes/gstReports.routes.js';
+
 
 // ============================================
 // MOUNT ROUTES

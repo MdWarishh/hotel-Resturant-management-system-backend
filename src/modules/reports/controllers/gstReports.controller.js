@@ -8,22 +8,14 @@ import { HTTP_STATUS, USER_ROLES, ORDER_STATUS } from '../../../config/constants
 import asyncHandler from '../../../utils/asyncHandler.js';
 import AppError from '../../../utils/AppError.js';
 import ExcelJS from 'exceljs';
-import PDFDocument from 'pdfkit';
 
-/**
- * 📊 Get Bookings GST Report
- * GET /api/reports/gst/bookings
- * Access: Hotel Admin, Manager
- */
 export const getBookingsGSTReport = asyncHandler(async (req, res) => {
   const { startDate, endDate, hotel } = req.query;
 
-  // Validate dates
   if (!startDate || !endDate) {
     throw new AppError('Start date and end date are required', HTTP_STATUS.BAD_REQUEST);
   }
 
-  // Build query
   const query = {
     createdAt: {
       $gte: new Date(startDate),
@@ -31,48 +23,38 @@ export const getBookingsGSTReport = asyncHandler(async (req, res) => {
     },
   };
 
-  // Hotel filter
   if (req.user.role !== USER_ROLES.SUPER_ADMIN) {
     query.hotel = req.user.hotel._id;
   } else if (hotel) {
     query.hotel = hotel;
   }
 
-  // Fetch bookings
+  // ✅ guest ko populate nahi karna - embedded object hai
   const bookings = await Booking.find(query)
     .populate('hotel', 'name code gst')
     .populate('room', 'roomNumber roomType')
-    .populate('guest', 'name email phone')
     .sort({ createdAt: -1 });
 
-  // Calculate totals
   let totalBookings = 0;
   let totalRevenue = 0;
   let totalGST = 0;
   let totalNet = 0;
-
   const dailyBreakdown = {};
 
   bookings.forEach((booking) => {
     totalBookings++;
-    const revenue = booking.pricing?.totalAmount || 0;
-    const gst = booking.pricing?.gst || 0;
-    const net = revenue + gst;
+    // ✅ Correct fields
+    const revenue = booking.pricing?.subtotal || 0;
+    const gst = booking.pricing?.tax || 0;
+    const net = booking.pricing?.total || 0;
 
     totalRevenue += revenue;
     totalGST += gst;
     totalNet += net;
 
-    // Daily breakdown
     const date = new Date(booking.createdAt).toISOString().split('T')[0];
     if (!dailyBreakdown[date]) {
-      dailyBreakdown[date] = {
-        date,
-        bookings: 0,
-        revenue: 0,
-        gst: 0,
-        net: 0,
-      };
+      dailyBreakdown[date] = { date, bookings: 0, revenue: 0, gst: 0, net: 0 };
     }
     dailyBreakdown[date].bookings++;
     dailyBreakdown[date].revenue += revenue;
@@ -80,7 +62,6 @@ export const getBookingsGSTReport = asyncHandler(async (req, res) => {
     dailyBreakdown[date].net += net;
   });
 
-  // Convert daily breakdown to array
   const dailyData = Object.values(dailyBreakdown).sort(
     (a, b) => new Date(a.date) - new Date(b.date)
   );
@@ -95,62 +76,69 @@ export const getBookingsGSTReport = asyncHandler(async (req, res) => {
       endDate,
     },
     dailyBreakdown: dailyData,
-    bookings: bookings.map((b) => ({
-      bookingId: b.bookingId,
-      guestName: b.guest?.name || 'N/A',
-      roomNumber: b.room?.roomNumber || 'N/A',
-      checkIn: b.checkIn,
-      checkOut: b.checkOut,
-      revenue: b.pricing?.totalAmount || 0,
-      gst: b.pricing?.gst || 0,
-      total: (b.pricing?.totalAmount || 0) + (b.pricing?.gst || 0),
-      status: b.status,
-      createdAt: b.createdAt,
-    })),
+    bookings: bookings.map((b) => {
+      const subtotal = b.pricing?.subtotal || 0;
+      const tax = b.pricing?.tax || 0;
+      const halfTax = Math.round(tax / 2);
+      const nights = Math.ceil(
+        (new Date(b.dates?.checkOut) - new Date(b.dates?.checkIn)) / (1000 * 60 * 60 * 24)
+      ) || 0;
+
+      return {
+        bookingId: b.bookingNumber,             // ✅
+        invoiceNumber: `INV-${b.bookingNumber}`,
+        invoiceDate: b.createdAt,
+        guestName: b.guest?.name || 'N/A',      // ✅ embedded
+        roomNumber: b.room?.roomNumber || 'N/A',
+        roomType: b.room?.roomType || 'N/A',
+        checkIn: b.dates?.checkIn,              // ✅ dates.checkIn
+        checkOut: b.dates?.checkOut,            // ✅ dates.checkOut
+        nights,
+        roomCharges: b.pricing?.roomCharges || 0,
+        discount: b.pricing?.discount || 0,
+        taxableAmount: subtotal,
+        cgst: halfTax,
+        sgst: halfTax,
+        igst: 0,
+        totalGST: tax,
+        total: b.pricing?.total || 0,
+        status: b.status,
+        createdAt: b.createdAt,
+      };
+    }),
   });
 });
 
-/**
- * 📊 Get POS GST Report
- * GET /api/reports/gst/pos
- * Access: Hotel Admin, Manager
- */
 export const getPOSGSTReport = asyncHandler(async (req, res) => {
   const { startDate, endDate, hotel } = req.query;
 
-  // Validate dates
   if (!startDate || !endDate) {
     throw new AppError('Start date and end date are required', HTTP_STATUS.BAD_REQUEST);
   }
 
-  // Build query
   const query = {
     createdAt: {
       $gte: new Date(startDate),
       $lte: new Date(new Date(endDate).setHours(23, 59, 59, 999)),
     },
-    status: { $ne: ORDER_STATUS.CANCELLED }, // Exclude cancelled orders
+    status: { $ne: ORDER_STATUS.CANCELLED },
   };
 
-  // Hotel filter
   if (req.user.role !== USER_ROLES.SUPER_ADMIN) {
     query.hotel = req.user.hotel._id;
   } else if (hotel) {
     query.hotel = hotel;
   }
 
-  // Fetch orders
   const orders = await Order.find(query)
     .populate('hotel', 'name code gst')
     .populate('createdBy', 'name')
     .sort({ createdAt: -1 });
 
-  // Calculate totals
   let totalOrders = 0;
   let totalRevenue = 0;
   let totalGST = 0;
   let totalNet = 0;
-
   const dailyBreakdown = {};
   const orderTypeBreakdown = {
     'dine-in': { count: 0, revenue: 0, gst: 0 },
@@ -169,23 +157,15 @@ export const getPOSGSTReport = asyncHandler(async (req, res) => {
     totalGST += gst;
     totalNet += net;
 
-    // Order type breakdown
     if (orderTypeBreakdown[order.orderType]) {
       orderTypeBreakdown[order.orderType].count++;
       orderTypeBreakdown[order.orderType].revenue += revenue;
       orderTypeBreakdown[order.orderType].gst += gst;
     }
 
-    // Daily breakdown
     const date = new Date(order.createdAt).toISOString().split('T')[0];
     if (!dailyBreakdown[date]) {
-      dailyBreakdown[date] = {
-        date,
-        orders: 0,
-        revenue: 0,
-        gst: 0,
-        net: 0,
-      };
+      dailyBreakdown[date] = { date, orders: 0, revenue: 0, gst: 0, net: 0 };
     }
     dailyBreakdown[date].orders++;
     dailyBreakdown[date].revenue += revenue;
@@ -193,7 +173,6 @@ export const getPOSGSTReport = asyncHandler(async (req, res) => {
     dailyBreakdown[date].net += net;
   });
 
-  // Convert daily breakdown to array
   const dailyData = Object.values(dailyBreakdown).sort(
     (a, b) => new Date(a.date) - new Date(b.date)
   );
@@ -223,11 +202,6 @@ export const getPOSGSTReport = asyncHandler(async (req, res) => {
   });
 });
 
-/**
- * 📥 Export Bookings GST Report to Excel
- * GET /api/reports/gst/bookings/excel
- * Access: Hotel Admin, Manager
- */
 export const exportBookingsGSTExcel = asyncHandler(async (req, res) => {
   const { startDate, endDate, hotel } = req.query;
 
@@ -235,7 +209,6 @@ export const exportBookingsGSTExcel = asyncHandler(async (req, res) => {
     throw new AppError('Start date and end date are required', HTTP_STATUS.BAD_REQUEST);
   }
 
-  // Build query (same as getBookingsGSTReport)
   const query = {
     createdAt: {
       $gte: new Date(startDate),
@@ -249,60 +222,45 @@ export const exportBookingsGSTExcel = asyncHandler(async (req, res) => {
     query.hotel = hotel;
   }
 
+  // ✅ guest populate nahi
   const bookings = await Booking.find(query)
     .populate('hotel', 'name code gst')
     .populate('room', 'roomNumber roomType')
-    .populate('guest', 'name email phone')
     .sort({ createdAt: 1 });
 
   const hotelData = await Hotel.findById(query.hotel);
 
-  // Create workbook
   const workbook = new ExcelJS.Workbook();
   const worksheet = workbook.addWorksheet('Bookings GST Report');
 
-  // Header styling
-  worksheet.mergeCells('A1:H1');
+  worksheet.mergeCells('A1:K1');
   worksheet.getCell('A1').value = `${hotelData?.name || 'Hotel'} - Bookings GST Report`;
   worksheet.getCell('A1').font = { size: 16, bold: true };
   worksheet.getCell('A1').alignment = { horizontal: 'center' };
 
-  worksheet.mergeCells('A2:H2');
+  worksheet.mergeCells('A2:K2');
   worksheet.getCell('A2').value = `Period: ${new Date(startDate).toLocaleDateString()} - ${new Date(endDate).toLocaleDateString()}`;
   worksheet.getCell('A2').alignment = { horizontal: 'center' };
 
   worksheet.addRow([]);
 
-  // Column headers
   const headerRow = worksheet.addRow([
-    'Date',
-    'Booking ID',
-    'Guest Name',
-    'Room',
-    'Check-In',
-    'Check-Out',
-    'Revenue (₹)',
-    'GST (₹)',
-    'Total (₹)',
-    'Status',
+    'Date', 'Booking ID', 'Guest Name', 'Room', 'Check-In', 'Check-Out',
+    'Nights', 'Room Charges (₹)', 'Taxable Amt (₹)', 'GST (₹)', 'Total (₹)', 'Status',
   ]);
 
   headerRow.font = { bold: true, color: { argb: 'FFFFFFFF' } };
-  headerRow.fill = {
-    type: 'pattern',
-    pattern: 'solid',
-    fgColor: { argb: 'FF0070C0' },
-  };
+  headerRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0070C0' } };
 
-  // Data rows
-  let totalRevenue = 0;
-  let totalGST = 0;
-  let totalNet = 0;
+  let totalRevenue = 0, totalGST = 0, totalNet = 0;
 
   bookings.forEach((booking) => {
-    const revenue = booking.pricing?.totalAmount || 0;
-    const gst = booking.pricing?.gst || 0;
-    const net = revenue + gst;
+    const revenue = booking.pricing?.subtotal || 0;   // ✅
+    const gst = booking.pricing?.tax || 0;             // ✅
+    const net = booking.pricing?.total || 0;           // ✅
+    const nights = Math.ceil(
+      (new Date(booking.dates?.checkOut) - new Date(booking.dates?.checkIn)) / (1000 * 60 * 60 * 24)
+    ) || 0;
 
     totalRevenue += revenue;
     totalGST += gst;
@@ -310,11 +268,13 @@ export const exportBookingsGSTExcel = asyncHandler(async (req, res) => {
 
     worksheet.addRow([
       new Date(booking.createdAt).toLocaleDateString(),
-      booking.bookingId,
-      booking.guest?.name || 'N/A',
+      booking.bookingNumber,                           // ✅
+      booking.guest?.name || 'N/A',                   // ✅ embedded
       booking.room?.roomNumber || 'N/A',
-      new Date(booking.checkIn).toLocaleDateString(),
-      new Date(booking.checkOut).toLocaleDateString(),
+      new Date(booking.dates?.checkIn).toLocaleDateString(),   // ✅
+      new Date(booking.dates?.checkOut).toLocaleDateString(),  // ✅
+      nights,
+      booking.pricing?.roomCharges || 0,
       revenue,
       gst,
       net,
@@ -322,59 +282,23 @@ export const exportBookingsGSTExcel = asyncHandler(async (req, res) => {
     ]);
   });
 
-  // Total row
-  const totalRow = worksheet.addRow([
-    '',
-    '',
-    '',
-    '',
-    '',
-    'TOTAL:',
-    totalRevenue,
-    totalGST,
-    totalNet,
-    '',
-  ]);
+  const totalRow = worksheet.addRow(['', '', '', '', '', '', 'TOTAL:', totalRevenue, '', totalGST, totalNet, '']);
   totalRow.font = { bold: true };
-  totalRow.fill = {
-    type: 'pattern',
-    pattern: 'solid',
-    fgColor: { argb: 'FFE7E6E6' },
-  };
+  totalRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE7E6E6' } };
 
-  // Column widths
   worksheet.columns = [
-    { width: 12 },
-    { width: 15 },
-    { width: 20 },
-    { width: 10 },
-    { width: 12 },
-    { width: 12 },
-    { width: 12 },
-    { width: 12 },
-    { width: 12 },
-    { width: 12 },
+    { width: 12 }, { width: 15 }, { width: 20 }, { width: 10 },
+    { width: 12 }, { width: 12 }, { width: 8 }, { width: 15 },
+    { width: 15 }, { width: 12 }, { width: 12 }, { width: 12 },
   ];
 
-  // Send file
-  res.setHeader(
-    'Content-Type',
-    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-  );
-  res.setHeader(
-    'Content-Disposition',
-    `attachment; filename=Bookings_GST_Report_${startDate}_to_${endDate}.xlsx`
-  );
+  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  res.setHeader('Content-Disposition', `attachment; filename=Bookings_GST_Report_${startDate}_to_${endDate}.xlsx`);
 
   await workbook.xlsx.write(res);
   res.end();
 });
 
-/**
- * 📥 Export POS GST Report to Excel
- * GET /api/reports/gst/pos/excel
- * Access: Hotel Admin, Manager
- */
 export const exportPOSGSTExcel = asyncHandler(async (req, res) => {
   const { startDate, endDate, hotel } = req.query;
 
@@ -402,11 +326,9 @@ export const exportPOSGSTExcel = asyncHandler(async (req, res) => {
 
   const hotelData = await Hotel.findById(query.hotel);
 
-  // Create workbook
   const workbook = new ExcelJS.Workbook();
   const worksheet = workbook.addWorksheet('POS GST Report');
 
-  // Header
   worksheet.mergeCells('A1:J1');
   worksheet.getCell('A1').value = `${hotelData?.name || 'Hotel'} - POS GST Report`;
   worksheet.getCell('A1').font = { size: 16, bold: true };
@@ -418,31 +340,15 @@ export const exportPOSGSTExcel = asyncHandler(async (req, res) => {
 
   worksheet.addRow([]);
 
-  // Column headers
   const headerRow = worksheet.addRow([
-    'Date',
-    'Order No.',
-    'Order Type',
-    'Customer',
-    'Items',
-    'Revenue (₹)',
-    'GST (₹)',
-    'Total (₹)',
-    'Payment',
-    'Status',
+    'Date', 'Order No.', 'Order Type', 'Customer', 'Items',
+    'Revenue (₹)', 'GST (₹)', 'Total (₹)', 'Payment', 'Status',
   ]);
 
   headerRow.font = { bold: true, color: { argb: 'FFFFFFFF' } };
-  headerRow.fill = {
-    type: 'pattern',
-    pattern: 'solid',
-    fgColor: { argb: 'FFFF6600' },
-  };
+  headerRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFF6600' } };
 
-  // Data rows
-  let totalRevenue = 0;
-  let totalGST = 0;
-  let totalNet = 0;
+  let totalRevenue = 0, totalGST = 0, totalNet = 0;
 
   orders.forEach((order) => {
     const revenue = order.pricing?.subtotal || 0;
@@ -455,61 +361,26 @@ export const exportPOSGSTExcel = asyncHandler(async (req, res) => {
 
     worksheet.addRow([
       new Date(order.createdAt).toLocaleDateString(),
-      order.orderNumber,
-      order.orderType,
+      order.orderNumber, order.orderType,
       order.customer?.name || 'N/A',
       order.items?.length || 0,
-      revenue,
-      gst,
-      net,
+      revenue, gst, net,
       order.payment?.status || 'UNPAID',
       order.status,
     ]);
   });
 
-  // Total row
-  const totalRow = worksheet.addRow([
-    '',
-    '',
-    '',
-    '',
-    'TOTAL:',
-    totalRevenue,
-    totalGST,
-    totalNet,
-    '',
-    '',
-  ]);
+  const totalRow = worksheet.addRow(['', '', '', '', 'TOTAL:', totalRevenue, totalGST, totalNet, '', '']);
   totalRow.font = { bold: true };
-  totalRow.fill = {
-    type: 'pattern',
-    pattern: 'solid',
-    fgColor: { argb: 'FFE7E6E6' },
-  };
+  totalRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE7E6E6' } };
 
-  // Column widths
   worksheet.columns = [
-    { width: 12 },
-    { width: 15 },
-    { width: 15 },
-    { width: 18 },
-    { width: 8 },
-    { width: 12 },
-    { width: 12 },
-    { width: 12 },
-    { width: 12 },
-    { width: 12 },
+    { width: 12 }, { width: 15 }, { width: 15 }, { width: 18 }, { width: 8 },
+    { width: 12 }, { width: 12 }, { width: 12 }, { width: 12 }, { width: 12 },
   ];
 
-  // Send file
-  res.setHeader(
-    'Content-Type',
-    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-  );
-  res.setHeader(
-    'Content-Disposition',
-    `attachment; filename=POS_GST_Report_${startDate}_to_${endDate}.xlsx`
-  );
+  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  res.setHeader('Content-Disposition', `attachment; filename=POS_GST_Report_${startDate}_to_${endDate}.xlsx`);
 
   await workbook.xlsx.write(res);
   res.end();

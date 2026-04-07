@@ -4,6 +4,7 @@ import Hotel from '../../hotels/models/Hotel.model.js';
 import MenuCategory from '../models/MenuCategory.model.js';
 import MenuItem from '../models/MenuItem.model.js';
 import Order from '../models/Order.model.js';
+import pushRoutes from './push.routes.js';
 
 // Controllers
 import {
@@ -348,5 +349,5 @@ router.get(
   authorize(USER_ROLES.SUPER_ADMIN, USER_ROLES.HOTEL_ADMIN, USER_ROLES.MANAGER),
   getFeedbackSummary
 );
-
+router.use('/push', pushRoutes);
 export default router;
