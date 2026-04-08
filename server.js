@@ -6,10 +6,10 @@ import express from 'express';
 import mongoose from 'mongoose';
 import cors from 'cors';
 import connectDB from './src/config/database.js';
-import { initPush } from './src/services/push.service.js';
+
 
 dotenv.config();
-initPush();
+
 const app = express();
 
 // ============================================

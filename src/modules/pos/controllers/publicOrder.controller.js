@@ -9,8 +9,8 @@ import { successResponse } from '../../../utils/responseHandler.js';
 import { HTTP_STATUS, ORDER_STATUS } from '../../../config/constants.js';
 import asyncHandler from '../../../utils/asyncHandler.js';
 import AppError from '../../../utils/AppError.js';
-import PushSubscription from '../models/PushSubscription.model.js';
-import { sendPushToAll } from '../../../services/push.service.js';
+// import PushSubscription from '../models/PushSubscription.model.js';
+// import { sendPushToAll } from '../../../services/push.service.js';
 
 // ── 📧 Email import ──
 import { sendNewOrderEmail } from '../../../services/email.service.js';
@@ -173,29 +173,29 @@ export const placePublicOrder = asyncHandler(async (req, res) => {
   }
 
   // ── 11.5 🔔 PUSH NOTIFICATION ──
-  try {
-    const pushSubscriptions = await PushSubscription.find({ hotel: hotel._id });
-    if (pushSubscriptions.length > 0) {
-      const notifConfig = {
-        delivery:        { title: '🛵 New Delivery Order!'      },
-        takeaway:        { title: '🥡 New Takeaway Order!'       },
-        'room-service':  { title: '🛎️ New Room Service Order!'  },
-        'dine-in':       { title: '🍽️ New Dine-in Order!'       },
-      };
-      const config = notifConfig[orderType] || { title: '🆕 New Order!' };
-      const payload = {
-        title: config.title,
-        body: `${customer.name} • ₹${total} • Order #${order.orderNumber}`,
-        tag: order.orderNumber,
-        requireInteraction: true,
-        data: { orderNumber: order.orderNumber, orderType, url: '/pos/orders' },
-      };
-      const rawSubs = pushSubscriptions.map((s) => s.subscription);
-      await sendPushToAll(rawSubs, payload);
-    }
-  } catch (pushErr) {
-    console.error('🔔 Push error (non-critical):', pushErr.message);
-  }
+  // try {
+  //   const pushSubscriptions = await PushSubscription.find({ hotel: hotel._id });
+  //   if (pushSubscriptions.length > 0) {
+  //     const notifConfig = {
+  //       delivery:        { title: '🛵 New Delivery Order!'      },
+  //       takeaway:        { title: '🥡 New Takeaway Order!'       },
+  //       'room-service':  { title: '🛎️ New Room Service Order!'  },
+  //       'dine-in':       { title: '🍽️ New Dine-in Order!'       },
+  //     };
+  //     const config = notifConfig[orderType] || { title: '🆕 New Order!' };
+  //     const payload = {
+  //       title: config.title,
+  //       body: `${customer.name} • ₹${total} • Order #${order.orderNumber}`,
+  //       tag: order.orderNumber,
+  //       requireInteraction: true,
+  //       data: { orderNumber: order.orderNumber, orderType, url: '/pos/orders' },
+  //     };
+  //     const rawSubs = pushSubscriptions.map((s) => s.subscription);
+  //     await sendPushToAll(rawSubs, payload);
+  //   }
+  // } catch (pushErr) {
+  //   console.error('🔔 Push error (non-critical):', pushErr.message);
+  // }
 
   // ── 11.6 📧 EMAIL NOTIFICATION ──
   // Sirf delivery aur takeaway ke liye — ye wale miss ho jaate hain
