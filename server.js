@@ -1,6 +1,4 @@
 import dotenv from 'dotenv';
-dotenv.config();
-
 import { createServer } from 'http';
 import { Server } from 'socket.io';
 import { verifyToken } from './src/utils/jwt.js';
@@ -10,7 +8,7 @@ import cors from 'cors';
 import connectDB from './src/config/database.js';
 import { initPush } from './src/services/push.service.js';
 
-
+dotenv.config();
 initPush();
 const app = express();
 
