@@ -304,8 +304,13 @@ export const getAllBookings = asyncHandler(async (req, res) => {
     limit = PAGINATION.DEFAULT_LIMIT,
     hotel,
     status,
+    paymentStatus,
     search,
     bookingType,
+    dateFrom,
+    dateTo,
+    checkInFrom,
+    checkInTo,
   } = req.query;
 
   const query = {};
@@ -317,8 +322,18 @@ export const getAllBookings = asyncHandler(async (req, res) => {
   }
 
   if (status) query.status = status;
+  if (paymentStatus) query.paymentStatus = paymentStatus;
   if (bookingType && ['daily', 'hourly'].includes(bookingType)) query.bookingType = bookingType;
 
+  // Support both dateFrom/dateTo and checkInFrom/checkInTo (frontend uses checkInFrom/checkInTo)
+  const fromDate = checkInFrom || dateFrom;
+  const toDate   = checkInTo   || dateTo;
+  if (fromDate || toDate) {
+    query['dates.checkIn'] = {};
+    if (fromDate) query['dates.checkIn'].$gte = new Date(fromDate);
+    if (toDate)   query['dates.checkIn'].$lte = new Date(toDate);
+  }
+  
   if (search) {
     query.$or = [
       { bookingNumber: new RegExp(search, 'i') },
@@ -328,8 +343,8 @@ export const getAllBookings = asyncHandler(async (req, res) => {
     ];
   }
 
-  const pageNum = parseInt(page);
-  const limitNum = Math.min(parseInt(limit), PAGINATION.MAX_LIMIT);
+  const pageNum  = Math.max(1, parseInt(page)  || 1);
+  const limitNum = Math.max(1, parseInt(limit) || 10);   // 🔥 FIX: no MAX_LIMIT cap
   const skip = (pageNum - 1) * limitNum;
 
   const bookings = await Booking.find(query)
