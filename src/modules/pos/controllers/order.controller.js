@@ -570,3 +570,100 @@ export const getOrderInvoicePDF = asyncHandler(async (req, res) => {
 
   doc.end();
 });
+
+
+/**
+ * Add Items to Existing Order (Running Tab)
+ * PATCH /api/pos/orders/:id/items
+ * Use case: Customer ne pehle order kiya (unpaid, kitchen mein gaya),
+ * ab wahi customer doobara order karta hai to usi order mein items add ho jaayenge.
+ * Final payment poore combined bill pe hoga (markOrderPaid se).
+ */
+export const addItemsToOrder = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const { items, extraCharges } = req.body;
+
+  if (!items || !Array.isArray(items) || items.length === 0) {
+    throw new AppError('At least one item is required', HTTP_STATUS.BAD_REQUEST);
+  }
+
+  const order = await Order.findById(id);
+  if (!order) throw new AppError('Order not found', HTTP_STATUS.NOT_FOUND);
+
+  if (req.user.role !== USER_ROLES.SUPER_ADMIN) {
+    if (!req.user.hotel || order.hotel.toString() !== req.user.hotel._id.toString()) {
+      throw new AppError('Access denied to this order', HTTP_STATUS.FORBIDDEN);
+    }
+  }
+
+  if (order.status === ORDER_STATUS.CANCELLED) {
+    throw new AppError('Cannot add items to a cancelled order', HTTP_STATUS.BAD_REQUEST);
+  }
+  if (order.status === ORDER_STATUS.COMPLETED) {
+    throw new AppError('Cannot add items to a completed order', HTTP_STATUS.BAD_REQUEST);
+  }
+  if (order.payment?.status === 'PAID') {
+    throw new AppError('Order is already paid. Please create a new order for additional items.', HTTP_STATUS.BAD_REQUEST);
+  }
+
+  // ── Process new items — same logic as createOrder ──
+  for (const item of items) {
+    const menuItem = await MenuItem.findById(item.menuItem);
+    if (!menuItem) throw new AppError(`Menu item not found: ${item.menuItem}`, HTTP_STATUS.NOT_FOUND);
+    if (!menuItem.canOrder()) throw new AppError(`Item not available: ${menuItem.name}`, HTTP_STATUS.BAD_REQUEST);
+
+    const itemPrice = menuItem.getPrice(item.variant);
+    const itemSubtotal = itemPrice * item.quantity;
+
+    order.items.push({
+      menuItem: menuItem._id,
+      name: menuItem.name,
+      variant: item.variant || null,
+      quantity: item.quantity,
+      price: itemPrice,
+      subtotal: itemSubtotal,
+      specialInstructions: item.specialInstructions || '',
+      status: ORDER_STATUS.PENDING, // naya item kitchen queue mein pending se start hoga
+    });
+
+    menuItem.totalOrders += item.quantity;
+    await menuItem.save();
+  }
+
+  // ── Optional: naye extra charges bhi is round mein add karne ho to ──
+  if (Array.isArray(extraCharges)) {
+    const validNewCharges = extraCharges.filter((c) => c.label && Number(c.amount) > 0);
+    order.extraCharges.push(...validNewCharges);
+  }
+
+  // ── Poore order ki pricing recalculate — sab items (purane + naye) milake ──
+  const newSubtotal = order.items.reduce((sum, it) => sum + it.subtotal, 0);
+  const newExtraChargesTotal = order.extraCharges.reduce((sum, c) => sum + Number(c.amount), 0);
+  const tax = Math.ceil(((newSubtotal + newExtraChargesTotal) * GST_RATE) / 100);
+  const total = Math.ceil(newSubtotal + newExtraChargesTotal + tax + (order.pricing.deliveryCharge || 0));
+
+  order.pricing.subtotal = newSubtotal;
+  order.pricing.extraChargesTotal = newExtraChargesTotal;
+  order.pricing.tax = tax;
+  order.pricing.total = total;
+
+  // Agar order ready/served ho chuka tha aur naya item add hua, to wapas active/preparing mein le aao
+  if ([ORDER_STATUS.READY, ORDER_STATUS.SERVED].includes(order.status)) {
+    order.status = ORDER_STATUS.PREPARING;
+  }
+
+  await order.save();
+
+  const populatedOrder = await Order.findById(order._id)
+    .populate('hotel', 'name code address contact gst')
+    .populate('room', 'roomNumber')
+    .populate('booking', 'bookingNumber')
+    .populate('items.menuItem', 'name type preparationTime')
+    .populate('createdBy', 'name email');
+
+  const io = req.app.get('io');
+  io.of('/pos').emit('order:updated', populatedOrder);
+  io.of('/pos').emit('order:items-added', populatedOrder); // ✅ naya event — chaho to kitchen sound isi pe bhi bind kar sakte ho
+
+  return successResponse(res, HTTP_STATUS.OK, 'Items added to order successfully', { order: populatedOrder });
+});

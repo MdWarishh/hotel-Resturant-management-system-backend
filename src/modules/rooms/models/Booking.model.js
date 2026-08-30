@@ -67,8 +67,13 @@ const bookingSchema = new mongoose.Schema(
         type: String,
         required: [true, 'Guest phone is required'],
         trim: true,
-        // ✅ No strict 10-digit validation — accept any format
       },
+       gstNumber: {   
+    type: String,
+    trim: true,
+    uppercase: true,
+    default: '',
+  },
       idProof: {
         type: {
           type: String,

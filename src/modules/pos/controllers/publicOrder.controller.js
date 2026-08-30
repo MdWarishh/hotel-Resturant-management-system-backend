@@ -214,12 +214,16 @@ export const placePublicOrder = asyncHandler(async (req, res) => {
   }
 
   // ── 12. Socket emit ──
+  // ── 12. Socket emit ──
   const io = req.app.get('io');
   if (io) {
     const populatedOrder = await Order.findById(order._id)
       .populate('hotel', 'name code')
       .populate('items.menuItem', 'name images');
-    io.of('/pos').emit('order:new-public', populatedOrder);
+
+    io.of('/pos').emit('order:new-public', populatedOrder); // existing event — jahan public-order specific UI use ho raha hai wahan ke liye rakha hai
+    io.of('/pos').emit('order:created', populatedOrder);     // ✅ NEW — normal order:created bhi emit, taaki tumhara kitchen "notification sound" jahan bhi order:created pe bind hai wo bhi baj jaye
+    io.of('/pos').emit('order:updated', populatedOrder);
   }
 
   // ── 13. Response ──

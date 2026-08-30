@@ -34,6 +34,7 @@ import {
   checkoutOrder,
   getRunningOrders,
   getOrderInvoicePDF,
+  addItemsToOrder,
 } from '../controllers/order.controller.js';
 
 // Middleware
@@ -213,6 +214,8 @@ router.post(
 
 // Get single order
 router.get('/orders/:id', validateObjectId, getOrderById);
+
+router.patch('/:id/items', validateObjectId, addItemsToOrder);
 
 // Update order status
 router.patch(
