@@ -9,6 +9,7 @@ import {
   markNoShow,
   updatePayment,
   deleteBooking,
+  updateBooking,
 } from '../controllers/booking.controller.js';
 import { protect, authorize } from '../../../middlewares/auth.middleware.js';
 import {
@@ -49,6 +50,17 @@ router.get(
   '/:id',
   validateBookingId,
   getBookingById
+);
+
+// Update / Edit booking
+router.put(
+  '/:id',
+  validateBookingId,
+  authorize(
+    USER_ROLES.SUPER_ADMIN,
+    USER_ROLES.HOTEL_ADMIN,
+  ),
+  updateBooking
 );
 
 // Check-in guest

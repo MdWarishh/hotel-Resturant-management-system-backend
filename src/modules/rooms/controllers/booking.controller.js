@@ -495,3 +495,206 @@ export const deleteBooking = asyncHandler(async (req, res) => {
 
   return successResponse(res, HTTP_STATUS.OK, 'Booking deleted successfully');
 });
+
+/**
+ * Update Booking (edit guest info, dates, guests, charges etc.)
+ * PUT /api/bookings/:id
+ */
+export const updateBooking = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+
+  const booking = await Booking.findById(id).populate('room');
+  if (!booking) throw new AppError('Booking not found', HTTP_STATUS.NOT_FOUND);
+
+  // Authorization — hotel scoped
+  if (req.user.role !== USER_ROLES.SUPER_ADMIN) {
+    if (!req.user.hotel || booking.hotel.toString() !== req.user.hotel._id.toString()) {
+      throw new AppError('Access denied to edit this booking', HTTP_STATUS.FORBIDDEN);
+    }
+  }
+
+   // Don't allow editing terminal-state bookings
+  const adminRoles = [USER_ROLES.SUPER_ADMIN, USER_ROLES.HOTEL_ADMIN];
+  const isAdmin = adminRoles.includes(req.user.role);
+
+  // Cancelled / No-show → never editable, even for admin
+  const alwaysBlockedStatuses = [BOOKING_STATUS.CANCELLED, BOOKING_STATUS.NO_SHOW];
+  if (alwaysBlockedStatuses.includes(booking.status)) {
+    throw new AppError(`Cannot edit a booking with status "${booking.status}"`, HTTP_STATUS.BAD_REQUEST);
+  }
+
+  // Checked-out → editable only by admin
+  if (booking.status === BOOKING_STATUS.CHECKED_OUT && !isAdmin) {
+    throw new AppError('Only an admin can edit a checked-out booking', HTTP_STATUS.FORBIDDEN);
+  }
+
+  const {
+    guest,
+    numberOfGuests,
+    dates,
+    specialRequests,
+    additionalGuests,
+    customCharges,
+    manualHourlyRate,
+    manualDailyRate,
+    isFixedPrice,
+    hours,
+  } = req.body;
+
+  const room = booking.room; // existing room, not allowing room-change here
+
+  // ── If dates changed, re-check availability ──
+  let checkIn = booking.dates.checkIn;
+  let checkOut = booking.dates.checkOut;
+  if (dates?.checkIn) checkIn = new Date(dates.checkIn);
+  if (dates?.checkOut) checkOut = new Date(dates.checkOut);
+
+  if (checkIn >= checkOut) {
+    throw new AppError('Check-out must be after check-in', HTTP_STATUS.BAD_REQUEST);
+  }
+
+  if (dates?.checkIn || dates?.checkOut) {
+    const availabilityCheck = await checkRoomAvailability(
+      room._id,
+      checkIn,
+      checkOut,
+      booking.bookingType,
+      booking._id // exclude self
+    );
+    if (!availabilityCheck.available) {
+      throw new AppError(
+        `Room is already booked for this time period (Booking #${availabilityCheck.conflictingBooking.bookingNumber})`,
+        HTTP_STATUS.CONFLICT
+      );
+    }
+  }
+
+  // ── Recalculate guest counts (fallback to existing) ──
+  const finalGuestCount = numberOfGuests || booking.numberOfGuests;
+
+  // ── Recalculate pricing ──
+  let roomCharges = 0;
+  let duration = 0;
+  const finalHours = booking.bookingType === 'hourly' ? (hours || booking.hours) : undefined;
+
+  if (booking.bookingType === 'hourly') {
+    duration = finalHours;
+    const rate = manualHourlyRate ?? booking.pricing.manualHourlyRate;
+    if (rate && rate > 0) {
+      roomCharges = isFixedPrice ? rate : rate * finalHours;
+    } else {
+      const hourlyRate = room.pricing.hourlyRate > 0
+        ? room.pricing.hourlyRate
+        : Math.ceil(room.pricing.basePrice * 0.4);
+      roomCharges = hourlyRate * finalHours;
+    }
+  } else {
+    duration = Math.ceil((checkOut - checkIn) / (1000 * 60 * 60 * 24));
+    const rate = manualDailyRate ?? booking.pricing.manualDailyRate;
+    if (rate && rate > 0) {
+      roomCharges = isFixedPrice ? rate : rate * duration;
+    } else {
+      roomCharges = room.pricing.basePrice * duration;
+    }
+  }
+
+  // Extra guest charges (daily only)
+  let extraCharges = 0;
+  if (booking.bookingType === 'daily') {
+    if (finalGuestCount.adults > room.capacity.adults) {
+      extraCharges += (finalGuestCount.adults - room.capacity.adults) * (room.pricing.extraAdultCharge || 0) * duration;
+    }
+    if (finalGuestCount.children > room.capacity.children) {
+      extraCharges += (finalGuestCount.children - room.capacity.children) * (room.pricing.extraChildCharge || 0) * duration;
+    }
+  }
+
+  // Custom charges
+  const finalCustomCharges = Array.isArray(customCharges)
+    ? customCharges.filter(c => c.label && Number(c.amount) > 0)
+    : booking.pricing.customCharges;
+  const customChargesTotal = finalCustomCharges.reduce((sum, c) => sum + Number(c.amount), 0);
+
+  const subtotal = roomCharges + extraCharges + customChargesTotal;
+  const tax = Math.round((subtotal * GST_RATE) / 100);
+  const total = Math.round(subtotal + tax);
+
+  // ── Apply updates ──
+   if (guest) {
+    const existingGuestObj = booking.guest.toObject?.() ?? booking.guest;
+    const existingIdProof = existingGuestObj.idProof || {};
+
+    let updatedIdProof = existingIdProof;
+
+    if (guest.idProof) {
+      updatedIdProof = {
+        ...existingIdProof,
+        ...guest.idProof,
+      };
+
+      // ✅ Only touch `image` if a NEW image was actually uploaded.
+      // Never assign `undefined` — that's what was crashing the cast.
+      if (guest.idProof.imageBase64) {
+        updatedIdProof.image = { url: guest.idProof.imageBase64 };
+      } else {
+        // keep the existing image untouched
+        updatedIdProof.image = existingIdProof.image;
+      }
+
+      // imageBase64 isn't a schema field — strip it so it doesn't linger
+      delete updatedIdProof.imageBase64;
+
+      // if there's still no image at all, remove the key entirely
+      // instead of leaving it as `undefined`
+      if (updatedIdProof.image === undefined) {
+        delete updatedIdProof.image;
+      }
+    }
+
+    booking.guest = {
+      ...existingGuestObj,
+      ...guest,
+      idProof: updatedIdProof,
+    };
+  }
+
+  booking.numberOfGuests = finalGuestCount;
+  if (additionalGuests) booking.additionalGuests = additionalGuests;
+  if (specialRequests !== undefined) booking.specialRequests = specialRequests;
+  booking.dates.checkIn = checkIn;
+  booking.dates.checkOut = checkOut;
+  if (booking.bookingType === 'hourly') booking.hours = finalHours;
+
+  booking.pricing = {
+    ...booking.pricing,
+    roomCharges,
+    extraCharges,
+    customCharges: finalCustomCharges,
+    subtotal,
+    tax,
+    total,
+    ...(manualHourlyRate !== undefined ? { manualHourlyRate } : {}),
+    ...(manualDailyRate !== undefined ? { manualDailyRate } : {}),
+  };
+
+  // If already fully paid before but total changed, keep paymentStatus in sync (don't auto-mark paid)
+  if (booking.advancePayment > total) {
+    booking.advancePayment = total;
+  }
+  if (booking.advancePayment >= total && total > 0) {
+    booking.paymentStatus = PAYMENT_STATUS.PAID;
+  } else if (booking.advancePayment > 0) {
+    booking.paymentStatus = PAYMENT_STATUS.PARTIALLY_PAID;
+  } else {
+    booking.paymentStatus = PAYMENT_STATUS.PENDING;
+  }
+
+  booking.updatedBy = req.user._id;
+  await booking.save();
+
+  const updatedBooking = await Booking.findById(id)
+    .populate('hotel', 'name code address contact gst')
+    .populate('room', 'roomNumber roomType')
+    .populate('createdBy', 'name email')
+  return successResponse(res, HTTP_STATUS.OK, 'Booking updated successfully', { booking: updatedBooking });
+});

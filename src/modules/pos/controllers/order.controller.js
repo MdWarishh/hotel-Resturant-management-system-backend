@@ -430,6 +430,10 @@ const deductInventoryForOrder = async (order, user) => {
  * Get Running Orders
  * GET /api/pos/orders/running
  */
+/**
+ * Get Running Orders
+ * GET /api/pos/orders/running
+ */
 export const getRunningOrders = asyncHandler(async (req, res) => {
   let assignedHotel;
   if (req.user.role !== USER_ROLES.SUPER_ADMIN) {
@@ -441,6 +445,7 @@ export const getRunningOrders = asyncHandler(async (req, res) => {
     status: {
       $in: [ORDER_STATUS.PENDING, ORDER_STATUS.PREPARING, ORDER_STATUS.READY, ORDER_STATUS.SERVED],
     },
+    'payment.status': { $ne: 'PAID' }, // ✅ NEW — paid order ab dashboard ki running list se hat jayega
   })
     .populate('room', 'roomNumber')
     .populate('items.menuItem', 'name')
