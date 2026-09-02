@@ -261,6 +261,7 @@ router.post(
 
 // GET /api/pos/orders/:id/kot
 // GET /api/pos/orders/:id/kot
+// GET /api/pos/orders/:id/kot
 router.get('/orders/:id/kot', protect, authorize(
     USER_ROLES.SUPER_ADMIN,
     USER_ROLES.HOTEL_ADMIN,
@@ -272,49 +273,28 @@ router.get('/orders/:id/kot', protect, authorize(
       .populate('items.menuItem', 'name preparationTime category')
       .populate('room', 'roomNumber')
       .populate('customer', 'name phone')
-      .populate('hotel', 'name code address contact') // ✅ NEW
+      .populate('hotel', 'name')
 
     if (!order) {
       return res.status(404).json({ success: false, message: 'Order not found' })
     }
 
+    // ✅ Sirf items + table/room — koi pricing nahi (kitchen ticket)
     const kotData = {
-      // ✅ NEW — hotel branding
       hotelName: order.hotel?.name || 'Hotel',
-      hotelAddress: order.hotel?.address
-        ? `${order.hotel.address.street || ''}, ${order.hotel.address.city || ''}`.replace(/^,\s*|,\s*$/g, '').trim()
-        : null,
-      hotelPhone: order.hotel?.contact?.phone || null,
-
       kotNumber: order.orderNumber,
       orderId: order._id,
       orderType: order.orderType,
       tableNumber: order.tableNumber || null,
       roomNumber: order.room?.roomNumber || null,
       customerName: order.customer?.name || null,
-
       items: order.items.map(item => ({
         name: item.name,
         quantity: item.quantity,
         variant: item.variant || null,
         specialInstructions: item.specialInstructions || null,
         category: item.menuItem?.category || null,
-        price: item.price,       // ✅ NEW
-        subtotal: item.subtotal, // ✅ NEW
       })),
-
-      // ✅ NEW — pricing block, jaisa Swiggy demo mein hai
-      pricing: {
-        subtotal: order.pricing?.subtotal || 0,
-        extraCharges: order.extraCharges || [],
-        extraChargesTotal: order.pricing?.extraChargesTotal || 0,
-        discount: order.pricing?.discount || 0,
-        tax: order.pricing?.tax || 0,
-        total: order.pricing?.total || 0,
-      },
-      paymentMode: order.payment?.mode || null,     // ✅ NEW
-      paymentStatus: order.payment?.status || 'UNPAID', // ✅ NEW
-
       specialInstructions: order.specialInstructions || order.notes || null,
       placedAt: order.timestamps?.placed || order.createdAt,
       printedAt: new Date(),
